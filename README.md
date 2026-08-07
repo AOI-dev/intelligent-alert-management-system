@@ -42,6 +42,20 @@ values worth touching:
 host needs its own copy next to `docker-compose.yml` before `docker compose up`
 will start.
 
+## First-boot fixup: the bundled agent's interface
+
+Zabbix seeds a host named `Zabbix server` whose agent interface is hardcoded to
+`127.0.0.1`. Inside the server container that address is the server itself, not
+the agent, so every passive item fails with `another network error` until the
+interface is repointed at the `zabbix-agent` service. Active checks work
+regardless, which is why the agent looks half-alive rather than dead.
+
+In the frontend: *Data collection → Hosts → Zabbix server → Interfaces*, switch
+the agent interface from IP to DNS and set the name to `zabbix-agent`.
+
+This lives in the database, not in this repo — redo it after any
+`docker compose down -v`.
+
 ## Agent privileges
 
 `zabbix-agent` runs `privileged: true` with `pid: host` so host-level metrics
