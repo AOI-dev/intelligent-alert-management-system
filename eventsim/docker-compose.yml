@@ -1,0 +1,55 @@
+name: eventsim
+
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: eventsim-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-iSvZo0OwTr6sRUMPCppRKA}
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [eventsim]
+
+  server:
+    build: .
+    container_name: eventsim-server
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-alerts}
+      EVENTSIM_AUTOGENERATE: ${EVENTSIM_AUTOGENERATE:-false}
+      EVENTSIM_AUTOGENERATE_INTERVAL: ${EVENTSIM_AUTOGENERATE_INTERVAL:-10}
+    ports:
+      - "${EVENTSIM_PORT:-8090}:8090"
+    networks: [eventsim, prometheus]
+
+networks:
+  eventsim:
+    driver: bridge
+  # Joins the already-deployed Prometheus stack's network so that stack's
+  # server can scrape this one's /metrics by container name. Requires the
+  # prometheus stack to be deployed first.
+  prometheus:
+    name: prometheus_prometheus
+    external: true
+
+volumes:
+  kafka-data:
