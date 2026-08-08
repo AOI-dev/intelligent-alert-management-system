@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+import time
+
+from pydantic import BaseModel, Field
 
 
 class EventIn(BaseModel):
@@ -16,3 +18,4 @@ class Alert(BaseModel):
     value: float
     threshold: float
     labels: dict[str, str] = {}
+    timestamp: float = Field(default_factory=time.time)

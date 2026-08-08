@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>eventsim alerts</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 2rem; }
+  h1 { font-size: 1.25rem; margin-bottom: 0.25rem; }
+  #meta { color: #888; font-size: 0.85rem; margin-bottom: 1rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #8883; font-size: 0.9rem; }
+  th { color: #888; font-weight: 600; }
+  tr:hover { background: #8881; }
+  .sev { padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+  .sev-critical { background: #e5484d33; color: #e5484d; }
+  .sev-warning { background: #ffb22433; color: #b5850a; }
+  .sev-other { background: #8888; }
+  #empty { color: #888; padding: 1rem 0; }
+</style>
+</head>
+<body>
+  <h1>eventsim — alerts</h1>
+  <div id="meta">polling /alerts every 3s</div>
+  <div id="empty" hidden>no alerts yet</div>
+  <table id="tbl" hidden>
+    <thead>
+      <tr><th>time</th><th>severity</th><th>rule</th><th>source</th><th>metric</th><th>value</th><th>threshold</th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+<script>
+async function refresh() {
+  const res = await fetch('/alerts');
+  const alerts = await res.json();
+  document.getElementById('meta').textContent =
+    `${alerts.length} alert(s) — polling /alerts every 3s`;
+  document.getElementById('empty').hidden = alerts.length !== 0;
+  document.getElementById('tbl').hidden = alerts.length === 0;
+
+  const rows = document.getElementById('rows');
+  rows.textContent = '';
+  for (const a of alerts) {
+    const tr = document.createElement('tr');
+    const cells = [
+      new Date(a.timestamp * 1000).toLocaleString(),
+      null, // severity, filled below with a badge
+      a.rule,
+      a.source,
+      a.metric,
+      a.value,
+      a.threshold,
+    ];
+    for (const c of cells) {
+      const td = document.createElement('td');
+      if (c === null) {
+        const badge = document.createElement('span');
+        const sevClass = ['critical', 'warning'].includes(a.severity) ? a.severity : 'other';
+        badge.className = `sev sev-${sevClass}`;
+        badge.textContent = a.severity;
+        td.appendChild(badge);
+      } else {
+        td.textContent = c;
+      }
+      tr.appendChild(td);
+    }
+    rows.appendChild(tr);
+  }
+}
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

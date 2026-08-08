@@ -21,8 +21,20 @@ a future poller can call it the same way a human curl would.
   Returns the list of alerts fired (empty if none). Any that fire are
   published to the `alerts` Kafka topic as JSON.
 - `GET /rules` — the currently loaded trigger rules.
+- `GET /alerts` — the last 200 alerts consumed off the `alerts` Kafka topic,
+  newest first, as JSON. Backs the viewer page below.
+- `GET /` — a single-page viewer: polls `/alerts` every 3s and renders them
+  as a table. Open `http://<host>:8090/` in a browser.
 - `GET /health` — liveness check, used by `scripts/deploy.sh`.
 - `GET /metrics` — Prometheus exposition format.
+
+The server both produces to and consumes from the `alerts` topic — the
+consumer (`app/kafka_consumer.py`) just keeps an in-memory ring buffer
+(`app/store.py`, last 200) for the viewer page. It joins the topic with a
+fixed consumer group (`KAFKA_CONSUMER_GROUP`, default `eventsim-viewer`)
+starting from the earliest offset, so restarting the server doesn't lose
+history already sitting in Kafka — a real downstream consumer would use its
+own group and isn't affected by this one.
 
 Trigger rules live in `app/rules.py` as a flat, hardcoded list for now —
 `(metric, operator, threshold) -> severity`. No config file or DB yet; add
