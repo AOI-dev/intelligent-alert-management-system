@@ -34,7 +34,8 @@ services:
         condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      KAFKA_TOPIC: ${KAFKA_TOPIC:-alerts}
+      KAFKA_EVENTS_TOPIC: ${KAFKA_EVENTS_TOPIC:-monitoring.events.v1}
+      KAFKA_ALERTS_TOPIC: ${KAFKA_ALERTS_TOPIC:-monitoring.alerts.v1}
       EVENTSIM_AUTOGENERATE: ${EVENTSIM_AUTOGENERATE:-false}
       EVENTSIM_AUTOGENERATE_INTERVAL: ${EVENTSIM_AUTOGENERATE_INTERVAL:-10}
     ports:

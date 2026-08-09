@@ -1,0 +1,149 @@
+@startuml
+' Visual language: layered modules, queue symbols, boxed orthogonal arrows, and depth.
+skinparam shadowing true
+skinparam defaultFontName DejaVu Sans
+skinparam defaultFontSize 14
+skinparam componentStyle rectangle
+skinparam roundcorner 6
+skinparam linetype ortho
+skinparam ArrowColor #475569
+skinparam ArrowThickness 1.4
+skinparam packageStyle rectangle
+skinparam packageBorderColor #334155
+skinparam packageBackgroundColor #E7EDF3
+skinparam componentBorderColor #334155
+skinparam componentBackgroundColor #FFFFFF
+skinparam databaseBorderColor #8A5A24
+skinparam databaseBackgroundColor #FFF5E5
+skinparam queueBorderColor #8D3C2A
+skinparam queueBackgroundColor #FFE9E1
+skinparam nodeBorderColor #334155
+skinparam nodeBackgroundColor #F8FAFC
+skinparam rectangleBorderColor #334155
+skinparam rectangleBackgroundColor #FFFFFF
+skinparam noteBorderColor #A16207
+skinparam noteBackgroundColor #FEF3C7
+top to bottom direction
+
+title Интеллектуальная система управления мониторингом
+
+actor "Дежурный инженер\nNOC / SRE" as engineer
+cloud "Источники мониторинга\nZabbix | Prometheus | NMS\nоблака и региональные площадки" as sources
+component "Симулятор событий\nтестовые события и алерты\nбез доступа к инфраструктуре" as simulator
+cloud "Корпоративный мессенджер\nOAuth 2 и уведомления" as messenger
+
+package "Инфраструктурный контур доступа и интеграции" #DCECF7 {
+  node "Периметр" #FFFFFF {
+    component "WAF + Load Balancer\nDDoS-защита, TLS,\nrate limiting" as ingress
+    component "Web frontend\nединый центр мониторинга\nалерты, поиск, отчеты" as frontend
+  }
+
+  node "Индивидуальные интеграции мониторинга" #FFFFFF {
+    component "Адаптеры систем мониторинга\nотдельный коннектор для каждой\nсистемы: webhook / polling / API" as adapters
+    component "Фильтр событий\nподавление шума\nотбор по политикам" as filter
+  }
+}
+
+queue "Kafka\nшина событий и команд\nбуферизация пиков" as kafka
+
+package "Инфраструктурный контур управления алертами" #E2F0D9 {
+  node "Центральное приложение (FastAPI)" #FFFFFF {
+    component "API и доступ\nсессии, роли, OAuth 2" as api
+    component "Ядро алертов\nвалидация, правила,\nдедупликация, корреляция" as core
+    component "Оркестрация\nмаршрутизация, эскалации\nдоставка уведомлений" as routing
+    component "Центральный мониторинг\nсостояние, поиск, аудит\nотчеты и политики" as monitoring
+  }
+}
+
+package "Инфраструктурный контур данных и эксплуатации" #FCE4D6 {
+  database "TimescaleDB (PostgreSQL)\nhypertables: события, алерты, доставка\nсостояние инцидентов, политики, аудит\nretention и сжатие" as timescaledb
+  database "CMDB / справочники\nсервисы, объекты, владельцы,\nзоны ответственности" as cmdb
+  component "Redis cache\nгорячий контекст\nи защита CMDB" as cache
+  queue "DLQ\nошибочные события\nи повторная обработка" as dlq
+  node "Наблюдаемость" #FFFFFF {
+    component "Логи | метрики | трассировка\nSLO, аудит, задержки Kafka" as observability
+  }
+}
+
+package "Инфраструктурный AI-контур - подключается по необходимости" #E9DDF5 {
+  node "Независимый AI worker" #FFFFFF {
+    component "AI-анализ\nклассификация, приоритет,\nсемантическая дедупликация" as aiworker
+    component "LLM gateway\nмаршрутизация моделей,\nлимиты, retries" as llmgateway
+  }
+  node "Пул инференса" #FFFFFF {
+    component "LLM модели\nцентрально, регионально\nили рядом с клиентом" as models
+  }
+}
+
+' Основной путь: отдельная последовательная магистраль с прямоугольными стрелками.
+sources -down-> adapters : события
+simulator -down-> adapters : тестовые события
+adapters -down-> filter : нормализованные
+filter -down-> kafka : monitoring.events.v1
+kafka -down-> core : monitoring.alerts.v1
+core ..> kafka : AI enrichment jobs/results v1
+core -down-> routing : решение по правилам
+routing -right-> messenger : уведомления
+messenger -up-> engineer : алерты / эскалации
+
+' Централизованная работа через фронтенд.
+engineer -down-> frontend : HTTPS
+frontend -down-> ingress
+frontend -right-> api : API
+api -down-> monitoring : доступ к панели
+monitoring -down-> timescaledb : поиск / история / состояние
+api -right-> core : команды и политики
+
+' Контекст и хранение вынесены в короткие боковые связи.
+core -right-> cache : обогащение
+cache -right-> cmdb : контекст
+core -down-> timescaledb : события / аудит / состояние
+routing -down-> timescaledb : политики / доставка / история
+kafka -right-> dlq : ошибки
+
+' Асинхронный AI-контур никогда не перекрывает гарантированный путь.
+core ..> aiworker : запрос AI-обогащения
+aiworker -down-> llmgateway
+llmgateway -right-> models
+aiworker ..> kafka : результат AI
+
+' Операционные сигналы объединены в одной точке, чтобы линии не смешивались.
+adapters --> observability
+kafka --> observability
+api --> observability
+core --> observability
+routing --> observability
+aiworker --> observability
+
+note right of core
+  <b>Гарантированный режим</b>
+  Если AI или LLM недоступны,
+  правила, маршрутизация и доставка
+  уведомлений продолжают работать.
+end note
+
+note right of aiworker
+  <b>Выбор размещения AI</b>
+  Kafka-контракт позволяет запускать
+  worker централизованно, в регионе
+  или рядом с клиентом.
+end note
+
+legend right
+  <b>Как читать схему</b>
+  Контуры группируют компоненты по ответственности, а не задают
+  слоёную архитектуру или обязательный способ развертывания.
+
+  <b>Что масштабируется отдельно первым</b>
+  Коннекторы, Kafka-consumers, frontend, AI worker и пул инференса.
+
+  <b>Kafka: версии и extension points</b>
+  monitoring.events.v1 и monitoring.alerts.v1 отделяют источники
+  от FastAPI-монолита. AI jobs/results v1 позволяют запускать
+  параллельные worker'ы без блокировки детерминированного пути.
+
+  <b>TimescaleDB</b>
+  SQL-совместимая история: hypertables, retention и сжатие для
+  событий/алертов; реляционное состояние инцидентов и аудит.
+endlegend
+@enduml

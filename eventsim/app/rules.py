@@ -32,6 +32,7 @@ def evaluate(event: EventIn) -> list[Alert]:
         if _OPS[rule.op](event.value, rule.threshold):
             fired.append(
                 Alert(
+                    correlation_id=event.correlation_id,
                     rule=rule.name,
                     severity=rule.severity,
                     source=event.source,

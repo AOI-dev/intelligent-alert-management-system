@@ -19,18 +19,29 @@ LOCAL_DIR="${ROOT}/${LOCAL}"
 
 echo "==> syncing ${LOCAL} -> ${VM_HOST}:${REMOTE_NAME}"
 ssh "$VM_HOST" "mkdir -p $REMOTE_DIR"
+# flags.env is committed and always replaces remote runtime flags. .env stays
+# private to the deployment host, so credentials never cross the wire.
 rsync -az --exclude '.env' --exclude '.git' "$LOCAL_DIR"/ "$VM_HOST:$REMOTE_DIR"/
 
-echo "==> ensuring .env exists (never overwritten if already present)"
-ssh "$VM_HOST" "cd $REMOTE_DIR && [ -f .env ] || cp .env.example .env"
+if [ -f "$LOCAL_DIR/.env.example" ]; then
+  echo "==> ensuring secrets .env exists (never overwritten if already present)"
+  ssh "$VM_HOST" "cd $REMOTE_DIR && [ -f .env ] || cp .env.example .env"
+fi
+
+# Later --env-file values win. This makes flags reproducible on every
+# deployment even while an older remote .env still has stale non-secret keys.
+COMPOSE="docker compose --env-file flags.env"
+if ssh "$VM_HOST" "test -f $REMOTE_DIR/.env"; then
+  COMPOSE="docker compose --env-file .env --env-file flags.env"
+fi
 
 echo "==> docker compose up -d --build"
-ssh "$VM_HOST" "cd $REMOTE_DIR && docker compose up -d --quiet-pull --build"
+ssh "$VM_HOST" "cd $REMOTE_DIR && $COMPOSE up -d --quiet-pull --build"
 
 echo "==> waiting for containers to settle"
 sleep 5
 
-STATUS="$(ssh "$VM_HOST" "cd $REMOTE_DIR && docker compose ps --format '{{.Name}}: {{.Status}}'")"
+STATUS="$(ssh "$VM_HOST" "cd $REMOTE_DIR && $COMPOSE ps --format '{{.Name}}: {{.Status}}'")"
 echo "$STATUS"
 
 FAIL=0
@@ -49,7 +60,7 @@ fi
 
 if [ "$FAIL" -ne 0 ]; then
   echo "==> dumping last 50 lines per service"
-  ssh "$VM_HOST" "cd $REMOTE_DIR && docker compose logs --tail=50"
+  ssh "$VM_HOST" "cd $REMOTE_DIR && $COMPOSE logs --tail=50"
   exit 1
 fi
 

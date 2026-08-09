@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Monitoring Platform</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#10141d; color:#e8edf5; font:15px system-ui,sans-serif; margin:2rem; }
+  h1 { margin:0; font-size:1.4rem; } p { color:#9aa8bb; }
+  table { width:100%; border-collapse:collapse; margin-top:1rem; }
+  th,td { text-align:left; padding:.55rem; border-bottom:1px solid #2a3444; }
+  th { color:#9aa8bb; font-size:.78rem; text-transform:uppercase; }
+  .badge { border-radius:1rem; padding:.16rem .5rem; font-size:.78rem; font-weight:700; }
+  .critical { color:#ffb4b4; background:#7f1d1d; } .warning { color:#ffe4a3; background:#713f12; }
+  code { color:#8bd5ff; } #empty { color:#9aa8bb; margin-top:2rem; }
+</style>
+</head>
+<body>
+<h1>Monitoring platform</h1>
+<p id="meta">Waiting for Kafka alerts...</p>
+<div id="empty">No alerts consumed yet.</div>
+<table id="table" hidden>
+<thead><tr><th>Time</th><th>Severity</th><th>Rule</th><th>Source</th><th>Metric</th><th>Value</th><th>Correlation</th></tr></thead>
+<tbody id="rows"></tbody>
+</table>
+<script>
+async function refresh() {
+  const response = await fetch('/v1/alerts');
+  const messages = await response.json();
+  document.getElementById('meta').textContent = `${messages.length} alert(s) from monitoring.alerts.v1; refreshing every 3 seconds`;
+  document.getElementById('empty').hidden = messages.length > 0;
+  document.getElementById('table').hidden = messages.length === 0;
+  const rows = document.getElementById('rows'); rows.textContent = '';
+  for (const message of messages) {
+    const alert = message.data;
+    const row = document.createElement('tr');
+    const values = [new Date(message.occurred_at).toLocaleString(), null, alert.rule, alert.source, alert.metric, `${alert.value} / ${alert.threshold}`, message.correlation_id.slice(0, 8)];
+    values.forEach(value => { const cell = document.createElement('td'); if (value === null) { const badge = document.createElement('span'); badge.className = `badge ${alert.severity}`; badge.textContent = alert.severity; cell.appendChild(badge); } else { cell.textContent = value; } row.appendChild(cell); });
+    rows.appendChild(row);
+  }
+}
+refresh(); setInterval(refresh, 3000);
+</script>
+</body>
+</html>

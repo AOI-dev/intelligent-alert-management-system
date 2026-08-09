@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create .env from .env.example with freshly generated database passwords.
+# Create the secrets-only .env with freshly generated database passwords.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

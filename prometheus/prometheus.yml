@@ -12,3 +12,7 @@ scrape_configs:
   - job_name: eventsim
     static_configs:
       - targets: ["eventsim-server:8090"]
+
+  - job_name: platform
+    static_configs:
+      - targets: ["monitoring-platform:8100"]

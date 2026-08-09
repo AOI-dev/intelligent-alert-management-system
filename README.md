@@ -13,7 +13,8 @@ and a bundled agent that monitors the host it runs on.
 ## Start
 
 ```sh
-./scripts/gen-env.sh     # writes .env with random DB passwords
+./scripts/gen-env.sh     # writes secret-only .env with random DB passwords
+set -a; . .env; . flags.env; set +a
 docker compose up -d
 ```
 
@@ -27,20 +28,19 @@ zabbix-server`.
 
 ## Configuration
 
-Everything is driven by `.env` — see `.env.example` for the full list. The
-values worth touching:
+Configuration has two layers:
 
-- `ZABBIX_VERSION` — image tag shared by server, web and agent. Keep them equal;
-  a frontend newer than its server refuses to start.
-- `PHP_TZ` — frontend timezone, e.g. `Europe/Kyiv`.
-- `ZABBIX_WEB_PORT` / `ZABBIX_SERVER_PORT` — host bindings if 8080 or 10051 are
-  taken.
-- `ZBX_CACHESIZE`, `ZBX_STARTPOLLERS` — raise as the number of monitored hosts
-  grows.
+- `flags.env` is committed and deployed on every `scripts/deploy.sh` run. It
+  contains image versions, ports, timezone, host name, and server tuning — edit
+  it in Git to change deployment behavior.
+- `.env` is gitignored and secret-only: `MYSQL_ROOT_PASSWORD` and
+  `MYSQL_PASSWORD`. Generate it with `scripts/gen-env.sh`; deployment creates it
+  from `.env.example` only when absent and never overwrites it.
 
-`.env` is gitignored. It does **not** travel with a `git push`, so the deploy
-host needs its own copy next to `docker-compose.yml` before `docker compose up`
-will start.
+The values usually worth touching in `flags.env` are `ZABBIX_VERSION`, `PHP_TZ`,
+`ZABBIX_WEB_PORT`, `ZABBIX_SERVER_PORT`, `ZBX_CACHESIZE`, and `ZBX_STARTPOLLERS`.
+For manual Compose commands, source `.env` followed by `flags.env` as shown in
+*Start*; the deploy script applies the same precedence automatically.
 
 ## First-boot fixup: the bundled agent's interface
 
