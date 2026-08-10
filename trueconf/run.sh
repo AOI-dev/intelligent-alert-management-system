@@ -22,6 +22,9 @@ fi
 
 mkdir -p "$TRUECONF_DATA_DIR" "$TRUECONF_LOG_DIR"
 
+# Import shared helpers.
+. ./helpers.sh
+
 args=(
 	-d
 	--name "$TRUECONF_CONTAINER_NAME"
@@ -41,6 +44,10 @@ args=(
 
 echo "==> starting $TRUECONF_CONTAINER_NAME from $TRUECONF_IMAGE"
 docker run "${args[@]}" "$TRUECONF_IMAGE"
+
+# Allow admin panel access from any IP (default restricts to RFC1918/local).
+# This is applied after first boot so the container has generated its configs.
+_patch_admin_acl "$TRUECONF_CONTAINER_NAME"
 
 echo "==> control panel: http://localhost:${TRUECONF_HTTP_PORT}"
 echo "==> logs: docker logs -f $TRUECONF_CONTAINER_NAME"
