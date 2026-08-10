@@ -1,0 +1,99 @@
+"""Abstract ports (protocols) for algorithm plugins.
+
+Every extension point is defined as a Protocol so implementations can be
+classes, dataclasses, or even plain objects, and so the core stays decoupled
+from any concrete algorithm.
+"""
+
+from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+from app.contracts.messages import Decision, MonitoringAlert, MonitoringEvent
+
+
+@dataclass(frozen=True)
+class PluginMetadata:
+    """Human-readable metadata for logging, UI, and capability negotiation."""
+
+    name: str
+    version: str
+    category: str
+    description: str = ""
+    config_schema: dict[str, Any] | None = None
+
+
+class AlertSource(Protocol):
+    """Ingest alerts and events from an external system.
+
+    Implementations poll, subscribe, or expose webhooks. The core pulls items
+    from them via an async iterator and turns them into platform messages.
+    """
+
+    @property
+    def metadata(self) -> PluginMetadata: ...
+
+    async def open(self) -> None: ...
+    async def close(self) -> None: ...
+
+    async def events(self) -> AsyncIterator[MonitoringEvent]: ...
+    async def alerts(self) -> AsyncIterator[MonitoringAlert]: ...
+
+
+class AlertEnricher(Protocol):
+    """Add context to a single alert before it enters correlation.
+
+    Examples: severity normalization, asset lookup, CMDB enrichment, ML
+    classification. Each enricher runs in order; failures in one should not
+    break the chain.
+    """
+
+    @property
+    def metadata(self) -> PluginMetadata: ...
+
+    async def enrich(self, alert: MonitoringAlert, context: Mapping[str, Any]) -> MonitoringAlert: ...
+
+
+class Correlator(Protocol):
+    """Inspect a sequence/window of related alerts and produce decisions.
+
+    Examples: deduplication, storm suppression, root-cause grouping, incident
+    creation policy. A single alert may belong to multiple windows.
+    """
+
+    @property
+    def metadata(self) -> PluginMetadata: ...
+
+    async def correlate(
+        self,
+        key: str,
+        window: Sequence[MonitoringAlert],
+        context: Mapping[str, Any],
+    ) -> Sequence[Decision]: ...
+
+
+class DecisionExecutor(Protocol):
+    """Act on a decision produced by the correlation layer.
+
+    Examples: route to PagerDuty, create Jira ticket, suppress in Zabbix,
+    send Slack notification, trigger TrueConf emergency bridge.
+    """
+
+    @property
+    def metadata(self) -> PluginMetadata: ...
+
+    async def can_execute(self, decision: Decision) -> bool: ...
+
+    async def execute(self, decision: Decision, context: Mapping[str, Any]) -> None: ...
+
+
+class MetricExporter(Protocol):
+    """Expose internal metrics or status for a plugin category.
+
+    Examples: Prometheus counters, health probes, per-algorithm telemetry.
+    """
+
+    @property
+    def metadata(self) -> PluginMetadata: ...
+
+    def collect(self) -> Mapping[str, Any]: ...
