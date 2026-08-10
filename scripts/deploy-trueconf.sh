@@ -44,26 +44,25 @@ else
   ssh "$VM_HOST" "cd $REMOTE_DIR && ./start.sh"
 fi
 
-echo "==> waiting for container to settle"
-sleep 5
+echo "==> waiting for container to settle (first boot initializes the database)"
+for i in {1..60}; do
+  STATUS="$(ssh "$VM_HOST" "docker ps --format '{{.Names}}: {{.Status}}' | grep '$CONTAINER_NAME' || echo 'NOT RUNNING'")"
+  if echo "$STATUS" | grep -qi 'NOT RUNNING'; then
+    echo "==> FAIL: $CONTAINER_NAME is not running"
+    ssh "$VM_HOST" "cd $REMOTE_DIR && docker logs --tail=50 $CONTAINER_NAME" || true
+    exit 1
+  fi
+  # TrueConf exposes HTTP on port 80 inside the container, mapped to the host
+  # port configured in flags.env (default 80).
+  HTTP_CODE="$(ssh "$VM_HOST" "curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://localhost/ || echo 000")"
+  if [ "$HTTP_CODE" = "200" ]; then
+    echo "==> OK: TrueConf deployed and control panel is up (HTTP $HTTP_CODE after ${i}0s)"
+    exit 0
+  fi
+  echo "    ... not ready yet (HTTP $HTTP_CODE), retrying"
+  sleep 10
+done
 
-STATUS="$(ssh "$VM_HOST" "docker ps --format '{{.Names}}: {{.Status}}' | grep '$CONTAINER_NAME' || echo 'NOT RUNNING'")"
-echo "$STATUS"
-
-if echo "$STATUS" | grep -qi 'NOT RUNNING'; then
-  echo "==> FAIL: $CONTAINER_NAME is not running"
-  ssh "$VM_HOST" "cd $REMOTE_DIR && docker logs --tail=50 $CONTAINER_NAME" || true
-  exit 1
-fi
-
-# TrueConf exposes HTTP on port 80 inside the container, mapped to the host port
-# configured in flags.env (default 80).
-echo "==> checking control panel on VM localhost"
-HTTP_CODE="$(ssh "$VM_HOST" "curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://localhost/ || echo 000")"
-if [ "$HTTP_CODE" != "200" ]; then
-  echo "==> FAIL: control panel returned HTTP $HTTP_CODE"
-  ssh "$VM_HOST" "cd $REMOTE_DIR && docker logs --tail=50 $CONTAINER_NAME" || true
-  exit 1
-fi
-
-echo "==> OK: TrueConf deployed and control panel is up (HTTP $HTTP_CODE)"
+echo "==> FAIL: control panel did not become ready within 10 minutes"
+ssh "$VM_HOST" "cd $REMOTE_DIR && docker logs --tail=50 $CONTAINER_NAME" || true
+exit 1
