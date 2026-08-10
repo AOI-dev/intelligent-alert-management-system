@@ -8,8 +8,9 @@ delivery; consumers must be idempotent by `message_id`.
 
 | Topic | Producer | Consumer | Purpose |
 | --- | --- | --- | --- |
-| `monitoring.events.v1` | eventsim; future Zabbix/Prometheus adapters | platform ingestion contour | Normalized source events, including non-alerting observations. |
-| `monitoring.alerts.v1` | eventsim; future deterministic alert-core producers | platform alert contour | Alerts that have already fired. |
+| `monitoring.events.v1` | eventsim; future Zabbix/Prometheus adapters | `platform-ingestion-v1-events` | Normalized operational state transitions/events. |
+| `monitoring.observations.v1` | future curated Zabbix/Prometheus adapters | `platform-observations-v1` | Selected aggregates/forecasts, never all raw metric samples. |
+| `monitoring.alerts.v1` | eventsim; Alertmanager webhook; Zabbix webhook/API reconciliation | `platform-ingestion-v1-alerts` | Fired/resolved alert lifecycle records. |
 | `monitoring.ai.enrichment.v1` | platform alert core | parallel AI worker group | Optional enrichment jobs. |
 | `monitoring.ai.results.v1` | AI workers | platform AI result contour | Enrichment results; they never block the deterministic path. |
 
@@ -32,6 +33,18 @@ Every message is UTF-8 JSON and has this envelope:
 Use `message_id` as the Kafka key. `correlation_id` is created for one source
 event and preserved on every alert it produces. Add optional fields only; any
 breaking payload change requires a new topic version.
+
+## Monitoring-system ingestion
+
+- **Alertmanager webhook** is Prometheus's lifecycle fast path. It publishes
+  `firing` and `resolved` records to the platform, which normalizes them and
+  publishes `monitoring.alerts.v1`.
+- **Zabbix action webhook** is Zabbix's lifecycle fast path. **Zabbix JSON-RPC
+  `problem.get`** is the repair path; the platform polls open problems with a
+  dedicated read-only token and republishes idempotently by vendor event ID.
+- Prometheus and Zabbix remain their systems of record for raw metric history.
+  Do not export every sample/item update into Kafka. Publish only selected
+  forecasts or meaningful state transitions to `monitoring.observations.v1`.
 
 Kafka is transport and replay, not the query store. The platform will persist
 its operational timeline in TimescaleDB in a later increment.

@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: platform
+  group_by: [alertname, job, instance]
+  group_wait: 5s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: platform
+    webhook_configs:
+      - url: http://monitoring-platform:8100/v1/integrations/alertmanager/webhook
+        send_resolved: true

@@ -19,6 +19,15 @@ class MonitoringEvent(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
 
 
+class MonitoringObservation(BaseModel):
+    observation_id: UUID = Field(default_factory=uuid4)
+    source: str
+    metric: str
+    value: float
+    unit: str | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+
+
 class MonitoringAlert(BaseModel):
     alert_id: UUID = Field(default_factory=uuid4)
     rule: str
@@ -33,7 +42,13 @@ class MonitoringAlert(BaseModel):
 class MessageEnvelope(BaseModel):
     schema_version: Literal["1.0"] = SCHEMA_VERSION
     message_id: UUID = Field(default_factory=uuid4)
-    message_type: Literal["monitoring.event", "monitoring.alert", "ai.enrichment.request", "ai.enrichment.result"]
+    message_type: Literal[
+        "monitoring.observation",
+        "monitoring.event",
+        "monitoring.alert",
+        "ai.enrichment.request",
+        "ai.enrichment.result",
+    ]
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     producer: str
     correlation_id: UUID

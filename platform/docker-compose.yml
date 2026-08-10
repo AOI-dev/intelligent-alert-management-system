@@ -13,9 +13,12 @@ services:
       KAFKA_AI_REQUESTS_TOPIC: ${KAFKA_AI_REQUESTS_TOPIC:-monitoring.ai.enrichment.v1}
       KAFKA_AI_RESULTS_TOPIC: ${KAFKA_AI_RESULTS_TOPIC:-monitoring.ai.results.v1}
       PLATFORM_HISTORY_LIMIT: ${PLATFORM_HISTORY_LIMIT:-500}
+      ZABBIX_API_URL: ${ZABBIX_API_URL:-http://zabbix-web:8080/api_jsonrpc.php}
+      ZABBIX_API_TOKEN: ${ZABBIX_API_TOKEN:-}
+      ZABBIX_RECONCILE_INTERVAL: ${ZABBIX_RECONCILE_INTERVAL:-60}
     ports:
       - "${PLATFORM_PORT:-8100}:8100"
-    networks: [eventsim, prometheus]
+    networks: [eventsim, prometheus, zabbix]
 
 networks:
   eventsim:
@@ -23,4 +26,7 @@ networks:
     external: true
   prometheus:
     name: prometheus_prometheus
+    external: true
+  zabbix:
+    name: zabbix_zabbix
     external: true

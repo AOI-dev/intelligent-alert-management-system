@@ -1,0 +1,20 @@
+groups:
+  - name: platform-integration
+    rules:
+      - alert: EventsimUnavailable
+        expr: up{job="eventsim"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Event simulation server is unavailable"
+          runbook: "Check the eventsim-server container and its Kafka connection."
+
+      - alert: EventsimAlertRateHigh
+        expr: increase(eventsim_alerts_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Event simulator is producing an elevated alert rate"
+          runbook: "Inspect the platform alert landing page and source metrics."
