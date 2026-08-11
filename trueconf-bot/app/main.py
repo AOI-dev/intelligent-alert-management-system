@@ -1,34 +1,53 @@
-"""TrueConf chat bot, built on python-trueconf-bot (an aiogram-style wrapper
-around TrueConf Server's Chatbot API):
-https://github.com/TrueConf/python-trueconf-bot
+"""TrueConf chat bot plus the incident-delivery adapter from
+artifacts/happy-path.md steps 9-10.
 
-This is a first spike, not the "mandatory TrueConf channel" delivery
-adapter from artifacts/happy-path.md step 9-10 yet. It proves the bot
-account/library round-trip works: register it as a chat bot in the TrueConf
-Server control panel, run this, and message it.
+Two things run in one process:
 
-notify() below is the piece that adapter needs -- a proactive send, not a
-reply to an incoming message -- confirmed against the installed library
-(1.4.2) by inspecting Bot.send_message/Bot.create_personal_chat directly,
-since the published README quickstart only documents the reply path
-(msg.answer()). Wiring an actual Kafka consumer for
-monitoring.notification-requests.v1 and a producer for
-monitoring.notification-results.v1, mirroring notifications/app/main.py,
-is the remaining deferred step -- notify() is ready for it, but nothing
-calls it yet.
+- the chat bot itself (echo/`/ping`), built on python-trueconf-bot -- an
+  aiogram-style wrapper around TrueConf Server's Chatbot API;
+- an HTTP endpoint, `POST /v1/notify`, which the notifications dispatcher
+  calls as a plain webhook. That is the whole integration: `platform`
+  resolves who to notify and writes the message, the dispatcher POSTs it
+  here, and this turns it into a TrueConf direct message.
+
+Why a webhook rather than a second Kafka consumer: notifications/ already
+consumes monitoring.notification-requests.v1, retries, dedups and publishes
+delivery outcomes. A Kafka consumer here would duplicate all of it and
+produce a second, divergent record of what was delivered. The dispatcher's
+`webhook_url` seam exists precisely so channels stay this thin.
+
+Running without TRUECONF_BOT_TOKEN is a supported, visible state: the HTTP
+server still starts, /health reports the bot as unavailable, and /v1/notify
+returns 503. Registering a chat bot needs a human in the TrueConf Server
+control panel, so the rest of the chain has to be deployable and testable
+before that token exists.
 """
+import asyncio
+import logging
 import os
+from contextlib import asynccontextmanager
 
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 from trueconf import Bot, Dispatcher, F, Message, ParseMode, Router
 
-TRUECONF_SERVER = os.environ["TRUECONF_SERVER"]
-TRUECONF_BOT_TOKEN = os.environ["TRUECONF_BOT_TOKEN"]
+logger = logging.getLogger(__name__)
+
+TRUECONF_SERVER = os.environ.get("TRUECONF_SERVER", "")
+TRUECONF_BOT_TOKEN = os.environ.get("TRUECONF_BOT_TOKEN", "")
 
 router = Router()
 dp = Dispatcher()
 dp.include_router(router)
 
-bot = Bot(server=TRUECONF_SERVER, token=TRUECONF_BOT_TOKEN, dispatcher=dp)
+bot: Bot | None = None
+if TRUECONF_SERVER and TRUECONF_BOT_TOKEN:
+    bot = Bot(server=TRUECONF_SERVER, token=TRUECONF_BOT_TOKEN, dispatcher=dp)
+else:
+    logger.warning(
+        "TRUECONF_SERVER/TRUECONF_BOT_TOKEN not set; HTTP API will start but "
+        "message delivery is disabled until a bot token is configured"
+    )
 
 
 @router.message(F.text == "/ping")
@@ -42,18 +61,73 @@ async def echo(msg: Message) -> None:
 
 
 async def notify(user_id: str, text: str) -> None:
-    """Proactively message a TrueConf user -- the call an incident-delivery
-    adapter would make. Not wired to anything yet; see module docstring.
-    """
+    """Proactively message a TrueConf user -- a send, not a reply."""
+    if bot is None:
+        raise RuntimeError("bot is not configured")
     chat = await bot.create_personal_chat(user_id)
     await bot.send_message(chat.chat_id, text, parse_mode=ParseMode.MARKDOWN)
 
 
-async def main() -> None:
-    await bot.run()
+class NotifyRequest(BaseModel):
+    """The subset of NotificationRequest.payload this channel needs.
+
+    `extra` is allowed and ignored: platform's routing service sends alert
+    context (rule, severity, metric, labels, ...) in the same payload for
+    other webhook consumers, and this adapter must not 422 on fields that
+    were never addressed to it.
+    """
+
+    model_config = {"extra": "allow"}
+
+    trueconf_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
 
 
-if __name__ == "__main__":
-    import asyncio
+@asynccontextmanager
+async def lifespan(api: FastAPI):
+    task: asyncio.Task | None = None
+    if bot is not None:
+        # The bot's own receive loop, so /ping and echo keep working
+        # alongside the HTTP channel. Failures here must not stop the HTTP
+        # server: outbound notification is the job that matters, and it
+        # goes through notify() rather than through this loop.
+        task = asyncio.create_task(bot.run())
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
-    asyncio.run(main())
+
+api = FastAPI(title="trueconf-bot", lifespan=lifespan)
+
+
+@api.get("/health")
+async def health() -> dict:
+    return {
+        "status": "ok",
+        "server": TRUECONF_SERVER or "unset",
+        "bot": "configured" if bot is not None else "unavailable: no TRUECONF_BOT_TOKEN",
+    }
+
+
+@api.post("/v1/notify", status_code=202)
+async def notify_endpoint(request: NotifyRequest) -> dict:
+    """Deliver one incident notification to a TrueConf user.
+
+    Returns 5xx on failure on purpose: the dispatcher turns a non-2xx into
+    a `notification.failed` result, so a delivery that did not happen is
+    recorded as such rather than being lost.
+    """
+    if bot is None:
+        raise HTTPException(status_code=503, detail="bot not configured: TRUECONF_BOT_TOKEN is unset")
+    try:
+        await notify(request.trueconf_id, request.text)
+    except Exception as error:
+        logger.exception("TrueConf delivery to %s failed", request.trueconf_id)
+        raise HTTPException(status_code=502, detail=f"TrueConf delivery failed: {error}") from error
+    return {"delivered_to": request.trueconf_id}

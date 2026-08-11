@@ -5,10 +5,45 @@ A first spike at a chat bot on TrueConf Server, using
 an aiogram-style wrapper around TrueConf Server's Chatbot API (requires
 server 5.5+, TrueConf Enterprise, or TrueConf Server Free).
 
-This is **not yet** the "mandatory TrueConf channel" delivery adapter
-`artifacts/happy-path.md` describes (step 9-10) — it's a working
-echo/`/ping` bot, plus a `notify()` helper for proactively messaging a
-user, ready for that adapter to call once it exists.
+This **is** the "mandatory TrueConf channel" delivery adapter
+`artifacts/happy-path.md` describes (steps 9-10), plus the original
+echo/`/ping` bot. One process serves both.
+
+## Incident delivery
+
+`POST /v1/notify` is the channel endpoint the `notifications` dispatcher
+calls as a plain webhook:
+
+```json
+{ "trueconf_id": "alice@trueconf.local", "text": "**[P1] ...**" }
+```
+
+Extra keys (rule, severity, metric, labels, …) are accepted and ignored —
+`platform` sends alert context in the same payload for other webhook
+consumers, and this adapter must not 422 on fields not addressed to it.
+
+Why a webhook and not a second Kafka consumer: `notifications/` already
+consumes `monitoring.notification-requests.v1`, dedups, and publishes
+delivery outcomes. A consumer here would duplicate that and produce a
+second, divergent record of what was delivered. Non-2xx is returned on
+failure so the dispatcher records `notification.failed` rather than losing
+the delivery silently.
+
+The full chain: `platform` correlates → a `route` decision → `app/routing/`
+resolves the on-call from `routing.json` and writes the message (Qwen, with
+a heuristic fallback) → `NotificationRequest` on Kafka → `notifications`
+POSTs it here → TrueConf direct message.
+
+**Without `TRUECONF_BOT_TOKEN` the HTTP server still starts**, `/health`
+reports the bot as unavailable and `/v1/notify` returns 503. Registering a
+chat bot needs a human in the TrueConf Server control panel, so the rest of
+the chain stays deployable and testable before that token exists.
+
+Verified in this session against the built container: `/health` reports the
+unconfigured state, a real `platform`-produced payload is accepted (503, not
+422), and with the bot stubbed the endpoint returns 202 and calls
+`create_personal_chat`/`send_message` with the right user and text. Delivery
+against a *live* TrueConf Server is still unverified — that needs the token.
 
 Dependencies are managed with `uv` (`pyproject.toml` + `uv.lock`), and the
 package installs and imports cleanly — verified in this session: `uv sync`

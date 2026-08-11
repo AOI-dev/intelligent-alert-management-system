@@ -307,3 +307,38 @@ docker compose --env-file flags.env --env-file .env up -d --build
 
 See `artifacts/kafka-protocol.md` for the v1 topic contract. The consumer group
 is independent from eventsim, so Kafka retains one stream for each application.
+
+## Notification routing (end to end)
+
+A `route` decision becomes a message in someone's TrueConf account:
+
+```
+correlate -> route Decision -> app/routing/ (who + wording) ->
+NotificationRequest -> notifications stack -> trueconf-bot /v1/notify -> TrueConf DM
+```
+
+- `app/routing/registry.py` — file-backed `service -> team -> on-call ->
+  {trueconf_id, webhook_url}`. Config lives in `routing.json` (gitignored;
+  see `routing.example.json`, or generate one from a scenario corpus with
+  `python3 -m scripts.routing_from_corpus ../scenario/corpus.json routing.json`).
+  A missing or malformed config degrades to "nobody is notified" — visible in
+  `platform_notifications_requested_total{outcome="unroutable"}` — rather than
+  taking ingestion down.
+- `app/ai/summarize.py` — the simplest useful AI in this system: one
+  JSON-constrained Qwen call for a headline, priority and next step
+  (~3.4s on the VM's T4). Every failure path — model down, timeout, bad
+  JSON, priority outside the vocabulary — falls back to pure string
+  formatting, so a notification always goes out and the model only affects
+  how well it reads. `summary_source` in the payload records which path
+  wrote it, and the metric is labelled by it.
+- Recipient resolution happens **before** the model is called: an alert
+  nobody owns must not spend a vLLM slot.
+
+Off by default (`NOTIFICATIONS_ENABLED=false`) — it is the only part of the
+pipeline that reaches a human. `NOTIFICATION_CONCURRENCY` bounds in-flight
+model calls; the incident id is derived from the correlation key, which is
+what makes the dispatcher's dedup work across restarts.
+
+Known gap: routing uses the *alerting* service's owner, not the root cause's.
+For a cascade that pages the wrong team — see `scenario/README.md` for the
+measured precision impact.

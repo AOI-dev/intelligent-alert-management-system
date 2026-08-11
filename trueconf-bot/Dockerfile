@@ -14,4 +14,6 @@ RUN uv sync --frozen --no-install-project --no-dev
 
 COPY app ./app
 
-CMD ["uv", "run", "--frozen", "--no-dev", "python", "-m", "app.main"]
+# Serves the /v1/notify delivery endpoint and runs the chat bot's receive
+# loop from the same process (see app/main.py's lifespan).
+CMD ["uv", "run", "--frozen", "--no-dev", "uvicorn", "app.main:api", "--host", "0.0.0.0", "--port", "8120"]

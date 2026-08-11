@@ -16,6 +16,7 @@ from app.ai.service import EnrichmentService
 from app.contracts.messages import (
     AI_REQUESTS_TOPIC,
     AI_RESULTS_TOPIC,
+    NOTIFICATION_REQUESTS_TOPIC,
     Decision,
     EnrichmentRequest,
     EnrichmentResult,
@@ -43,6 +44,8 @@ from app.integration.zabbix import ZabbixApiClient
 from app.monitoring.persistence import init_monitoring_models, log_alert, log_decision, log_event
 from app.monitoring.query import filter_messages, find_by_field, summarize
 from app.monitoring.store import MessageStore
+from app.routing.registry import RoutingRegistry
+from app.routing.service import NotificationRouter
 
 logger = logging.getLogger(__name__)
 KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "eventsim-kafka:9092")
@@ -63,6 +66,15 @@ RATE_LIMIT_API_REFILL_PER_SECOND = float(os.environ.get("RATE_LIMIT_API_REFILL_P
 # allowed anywhere near it.
 AI_ENRICHMENT_MODE = os.environ.get("AI_ENRICHMENT_MODE", "off")
 AI_ENRICHMENT_TIMEOUT = float(os.environ.get("AI_ENRICHMENT_TIMEOUT_SECONDS", "30"))
+ROUTING_CONFIG_PATH = os.environ.get("ROUTING_CONFIG_PATH", "routing.json")
+# Notification delivery is opt-in for the same reason AI enrichment is: it is
+# the only part of this pipeline that reaches a human, so it stays off until
+# the routing config has been reviewed on the deployment host.
+NOTIFICATIONS_ENABLED = os.environ.get("NOTIFICATIONS_ENABLED", "false").lower() == "true"
+# Bounds concurrent notification builds. Each one may call the model, and the
+# vLLM server has a finite slot count -- an alert storm must not open one
+# in-flight completion per routed alert.
+NOTIFICATION_CONCURRENCY = int(os.environ.get("NOTIFICATION_CONCURRENCY", "4"))
 
 filter_service = EventFilter()
 plugin_registry = PluginRegistry.from_env(
@@ -71,6 +83,9 @@ plugin_registry = PluginRegistry.from_env(
 plugin_engine = PluginEngine(plugin_registry)
 correlation_engine = CorrelationEngine()
 enrichment_service = EnrichmentService()
+routing_registry = RoutingRegistry.from_file(ROUTING_CONFIG_PATH)
+notification_router = NotificationRouter(routing_registry)
+notification_slots = asyncio.Semaphore(NOTIFICATION_CONCURRENCY)
 events = MessageStore(HISTORY_LIMIT)
 alerts = MessageStore(HISTORY_LIMIT)
 decisions = MessageStore(HISTORY_LIMIT)
@@ -79,6 +94,11 @@ produced_total = Counter("platform_kafka_published_total", "Kafka messages publi
 webhooks_total = Counter("platform_webhooks_total", "Monitoring webhooks received", ["source", "outcome"])
 zabbix_reconcile_total = Counter("platform_zabbix_reconcile_total", "Zabbix reconciliation results", ["outcome"])
 decisions_total = Counter("platform_core_decisions_total", "Decisions produced by the alert core", ["decision_type"])
+notifications_total = Counter(
+    "platform_notifications_requested_total",
+    "Notification requests published, by how the wording was produced",
+    ["outcome"],
+)
 
 
 async def handle_event(message: MessageEnvelope) -> None:
@@ -100,11 +120,22 @@ async def handle_alert(message: MessageEnvelope) -> None:
         await log_alert(session, message.message_id, message.occurred_at, message.correlation_id, message.data)
 
     alert = MonitoringAlert.model_validate(message.data)
+    routed: list[Decision] = []
     for decision in await plugin_engine.process(alert):
         await publish_decision(decision, message.correlation_id)
+        if decision.decision_type == "route":
+            routed.append(decision)
     # Legacy pipeline kept available until plugin engine is fully validated.
     for decision in correlation_engine.process(alert):
         await publish_decision(decision, message.correlation_id)
+        if decision.decision_type == "route":
+            routed.append(decision)
+    if NOTIFICATIONS_ENABLED and routed:
+        # Both engines run, so both can route the same alert (they publish
+        # duplicate decisions today by design). Notify on the first only --
+        # otherwise registering FlapAwareCorrelatorPlugin in PLUGIN_PATHS
+        # would silently start paging the on-call twice per incident.
+        asyncio.create_task(notify_for_decision(routed[0], alert, message.correlation_id))
     if AI_ENRICHMENT_MODE != "off":
         asyncio.create_task(enrich_alert(alert, message.correlation_id))
 
@@ -174,6 +205,49 @@ async def enrich_alert(alert: MonitoringAlert, correlation_id: UUID) -> None:
             ),
         )
         produced_total.labels(topic=AI_RESULTS_TOPIC, source="platform-ai").inc()
+
+
+async def notify_for_decision(decision: Decision, alert: MonitoringAlert, correlation_id: UUID) -> None:
+    """Publish the NotificationRequest a `route` decision implies.
+
+    Detached from handle_alert for the same reason enrich_alert is: building
+    the message may call the model, and alert consumption must not stall
+    behind it. Unlike enrichment, this is bounded by a semaphore -- routed
+    alerts are rare, but a storm that routes many at once would otherwise
+    open one in-flight completion per alert against a fixed number of vLLM
+    slots.
+
+    Delivery itself is the notifications stack's job: this only publishes
+    the request. A failure here means nobody is paged, so every outcome is
+    counted rather than logged and forgotten.
+    """
+    producer: KafkaProducer | None = app.state.producer
+    if producer is None:
+        return
+    try:
+        async with notification_slots:
+            request = await notification_router.build(decision, alert)
+    except Exception:
+        logger.exception("Notification routing failed for alert %s", alert.alert_id)
+        notifications_total.labels(outcome="error").inc()
+        return
+    if request is None:
+        notifications_total.labels(outcome="unroutable").inc()
+        return
+
+    await producer.publish(
+        NOTIFICATION_REQUESTS_TOPIC,
+        MessageEnvelope(
+            message_type="notification.requested",
+            producer="platform-routing",
+            correlation_id=correlation_id,
+            data=request.model_dump(mode="json"),
+        ),
+    )
+    produced_total.labels(topic=NOTIFICATION_REQUESTS_TOPIC, source="platform-routing").inc()
+    # Labelled by which path wrote the wording, so "is the model actually
+    # contributing" is a metric rather than a log-reading exercise.
+    notifications_total.labels(outcome=str(request.payload.get("summary_source", "unknown"))).inc()
 
 
 DECISION_MESSAGE_TYPES: dict[str, Literal["decision.dedup", "decision.route", "decision.suppress"]] = {

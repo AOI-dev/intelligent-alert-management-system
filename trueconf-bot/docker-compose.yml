@@ -5,6 +5,22 @@ services:
     build: .
     container_name: trueconf-bot
     restart: unless-stopped
+    ports:
+      # The notifications dispatcher POSTs here. Published on the host rather
+      # than shared over a Docker network because the stacks on this VM are
+      # independent compose projects -- same reason TRUECONF_SERVER is a raw
+      # host address (see flags.env and trueconf/README.md).
+      - "${TRUECONF_BOT_PORT:-8120}:8120"
     environment:
       TRUECONF_SERVER: ${TRUECONF_SERVER}
-      TRUECONF_BOT_TOKEN: ${TRUECONF_BOT_TOKEN}
+      # Optional: without it the HTTP API still starts, /health reports the
+      # bot unavailable and /v1/notify returns 503. Registering a chat bot
+      # needs a human in the TrueConf control panel, so the rest of the chain
+      # has to be deployable before this exists.
+      TRUECONF_BOT_TOKEN: ${TRUECONF_BOT_TOKEN:-}
+    networks:
+      - trueconf-bot
+
+networks:
+  trueconf-bot:
+    driver: bridge

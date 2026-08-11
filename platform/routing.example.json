@@ -1,0 +1,58 @@
+{
+  "_comment": [
+    "Routing config for app/routing/registry.py. Copy to routing.json and edit;",
+    "routing.json is gitignored because it names real people and real endpoints.",
+    "",
+    "services: which team owns each service. Matched against the alert's",
+    "  `service` label; alerts without one fall through to default_team.",
+    "teams:    who carries the pager. `oncall` is the fallback; `shifts` (UTC",
+    "          HH:MM, optional) override it and may cross midnight.",
+    "targets:  how to reach a login. trueconf_id is the TrueConf account the",
+    "          message is sent to; webhook_url is the channel adapter that",
+    "          sends it -- trueconf-bot's /v1/notify here.",
+    "",
+    "Generate a filled-in version from a scenario corpus with:",
+    "  python3 -m scripts.routing_from_corpus ../scenario/corpus.json routing.json"
+  ],
+  "default_team": "platform_infra",
+  "services": {
+    "db_primary": "platform_infra",
+    "db_replica": "platform_infra",
+    "sessions": "platform_infra",
+    "log_archive": "platform_infra",
+    "checkout": "payments",
+    "payments_api": "payments",
+    "storefront_web": "storefront",
+    "cart": "storefront",
+    "catalog": "storefront"
+  },
+  "teams": {
+    "platform_infra": {
+      "oncall": "alice",
+      "shifts": [
+        { "from": "08:00", "to": "20:00", "login": "alice" },
+        { "from": "20:00", "to": "08:00", "login": "boris" }
+      ]
+    },
+    "payments": { "oncall": "carmen" },
+    "storefront": { "oncall": "elena" }
+  },
+  "targets": {
+    "alice": {
+      "trueconf_id": "alice@trueconf.local",
+      "webhook_url": "http://161.104.107.172:8120/v1/notify"
+    },
+    "boris": {
+      "trueconf_id": "boris@trueconf.local",
+      "webhook_url": "http://161.104.107.172:8120/v1/notify"
+    },
+    "carmen": {
+      "trueconf_id": "carmen@trueconf.local",
+      "webhook_url": "http://161.104.107.172:8120/v1/notify"
+    },
+    "elena": {
+      "trueconf_id": "elena@trueconf.local",
+      "webhook_url": "http://161.104.107.172:8120/v1/notify"
+    }
+  }
+}
