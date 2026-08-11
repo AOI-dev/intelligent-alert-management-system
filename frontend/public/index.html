@@ -66,7 +66,7 @@
   <button data-view="incidents">Incidents</button>
   <button data-view="admin">Admin</button>
 </nav>
-<div id="login-required">Session expired or not logged in yet. <a href="/v1/auth/login">Log in</a> to see live data.</div>
+<div id="login-required">Session expired or not logged in yet. <a id="login-required-link" href="/v1/auth/login">Log in</a> to see live data.</div>
 <div id="not-implemented">Not implemented yet on the server (501) — not "nothing to show", genuinely not built. See the platform README's "Incidents" section.</div>
 <div id="forbidden">Admin role required — you're logged in, but this identity doesn't have the "admin" role. Ask an existing admin to grant it via this same panel.</div>
 <div id="empty">No data yet.</div>
@@ -409,6 +409,12 @@ async function refreshSummary() {
 async function updateAuthLink() {
   const link = document.getElementById('auth-link');
   link.href = loginUrl();
+  // The same URL for the "log in" link inside the logged-out notice. It
+  // carries return_to; without it the callback has no idea which origin to
+  // hand the finished login back to, and now that the callback is served
+  // from the TrueConf origin (see trueconf-tls/README.md) that lands the
+  // browser on TrueConf's own 404 page rather than here.
+  document.getElementById('login-required-link').href = loginUrl();
   const response = await fetch('/v1/auth/me', { credentials: 'same-origin', headers: authHeaders() });
   if (response.ok) {
     const identity = await response.json();

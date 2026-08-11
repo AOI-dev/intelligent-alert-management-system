@@ -47,6 +47,14 @@ docker compose up -d --build
 
 Open `http://<host>:8091`.
 
+On the VM, use **`https://161.104.107.172:8543`** instead — the same
+frontend, served over TLS by `trueconf-tls/`'s nginx. TrueConf login only
+completes from there: the OAuth2 state cookie is `SameSite=Lax`, and
+browsers treat `http://…:8091` and the `https://…:8443` callback as
+cross-site (same host, different scheme), so the cookie never comes back.
+See `trueconf-tls/README.md`, "The callback has to live on the TrueConf
+origin". Everything else works on either.
+
 ## Deploy
 
 ```sh

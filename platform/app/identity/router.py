@@ -2,7 +2,7 @@ import os
 import secrets
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from pydantic import BaseModel
@@ -21,6 +21,21 @@ admin_router = APIRouter(prefix="/v1/identities", tags=["identities"])
 
 _state_serializer = URLSafeTimedSerializer("oauth-state")
 _RETURN_TO_ALLOWLIST = parse_allowlist(os.environ.get("AUTH_RETURN_TO_ALLOWLIST", ""))
+
+# Same signed state as the `state` query param, kept in a cookie as well,
+# because TrueConf Server 5.5 does not round-trip `state`: its callback
+# redirect is a bare `?code=...` (confirmed live -- its login SPA re-appends
+# state client-side from its own store, and that path doesn't run for this
+# flow). Without a fallback the callback can't recover `return_to`, and
+# loses the CSRF protection state exists for in the first place.
+#
+# A cookie works where the query param doesn't because cookies are scoped
+# by host and ignore the port: this is set from platform on :8100 and read
+# back on the callback, which trueconf-tls's nginx serves on :8443 of the
+# same host. Same reason `samesite="lax"` is enough -- TrueConf and
+# platform differ only by port, so the callback request is same-site.
+_OAUTH_STATE_COOKIE_NAME = "tc_oauth_state"
+_OAUTH_STATE_MAX_AGE_SECONDS = 600
 
 
 def _oauth_client() -> TrueConfOAuthClient:
@@ -53,15 +68,32 @@ async def login(return_to: str | None = None) -> RedirectResponse:
     client = _oauth_client()
     validated_return_to = validate_return_to(return_to, _RETURN_TO_ALLOWLIST)
     state = _state_serializer.dumps({"nonce": secrets.token_urlsafe(16), "return_to": validated_return_to})
-    return RedirectResponse(client.authorize_url(state))
+    response = RedirectResponse(client.authorize_url(state))
+    response.set_cookie(
+        _OAUTH_STATE_COOKIE_NAME,
+        state,
+        max_age=_OAUTH_STATE_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 @router.get("/callback")
 async def callback(
-    code: str, state: str, session: AsyncSession = Depends(get_session)
+    code: str,
+    state: str | None = None,
+    tc_oauth_state: str | None = Cookie(default=None),
+    session: AsyncSession = Depends(get_session),
 ) -> RedirectResponse:
+    # Query param first, cookie second: the param is what OAuth 2.0 says
+    # should be there, so honour it wherever it does come back, and only
+    # fall back to the cookie for servers like this one that drop it.
+    presented_state = state or tc_oauth_state
+    if not presented_state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state")
     try:
-        state_payload = _state_serializer.loads(state, max_age=600)
+        state_payload = _state_serializer.loads(presented_state, max_age=_OAUTH_STATE_MAX_AGE_SECONDS)
     except BadSignature as error:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state") from error
 
@@ -86,7 +118,17 @@ async def callback(
         # allowlisted origin instead of only ever setting a same-host cookie.
         response = RedirectResponse(f"{return_to}/#session={token}")
     else:
-        response = RedirectResponse("/")
+        # Absolute, not "/": this callback is served from TrueConf's
+        # origin (trueconf-tls's nginx proxies it there so the flow stays
+        # single-origin -- see that stack's README), so a relative
+        # redirect resolves against *TrueConf's* root and dumps the user
+        # on its 404 page. AUTH_DEFAULT_RETURN_TO names the app to land on
+        # when the login didn't carry a return_to of its own; it goes
+        # through the same allowlist as any other return_to.
+        default_return_to = validate_return_to(
+            os.environ.get("AUTH_DEFAULT_RETURN_TO"), _RETURN_TO_ALLOWLIST
+        )
+        response = RedirectResponse(f"{default_return_to}/#session={token}" if default_return_to else "/")
 
     # Set regardless: harmless when return_to is used (that frontend origin
     # never sees this host's cookies anyway), and keeps the plain same-host
@@ -99,6 +141,9 @@ async def callback(
         httponly=True,
         samesite="lax",
     )
+    # One login, one state. Leaving it set would let a stale state satisfy
+    # a later callback that arrived without one of its own.
+    response.delete_cookie(_OAUTH_STATE_COOKIE_NAME)
     return response
 
 

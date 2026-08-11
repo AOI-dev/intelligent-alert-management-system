@@ -3,6 +3,10 @@
 Self-contained Zabbix monitoring stack on MySQL: server, nginx frontend, database
 and a bundled agent that monitors the host it runs on.
 
+> This is one stack of several — see `LOCAL.md` for bringing the whole
+> system up on one machine, and each subdirectory's README for what that
+> stack does.
+
 | Service         | Image                              | Exposed        |
 | --------------- | ---------------------------------- | -------------- |
 | `mysql`         | `mysql:8.0`                        | internal only  |

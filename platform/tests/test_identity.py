@@ -1,12 +1,16 @@
 from types import SimpleNamespace
+from unittest import mock
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
 
+import app.identity.router as router
 from app.identity.dependencies import require_role
-from app.identity.oauth_client import TrueConfOAuthClient, client_from_env
+from app.identity.models import Identity
+import app.identity.repository as repository
+from app.identity.oauth_client import TrueConfOAuthClient, _dig, client_from_env
 from app.identity.session import issue_session_cookie, read_session_cookie
 
 
@@ -43,7 +47,6 @@ def test_client_from_env_reads_all_required_vars(monkeypatch):
 
     assert client.base_url == "https://trueconf.internal"
     assert client.client_id == "cid"
-    assert client.userinfo_path == "/api/v4/users/self"
     assert client.verify_ssl is True  # secure by default
 
 
@@ -117,3 +120,92 @@ async def test_require_role_rejects_no_roles():
         await dependency(identity=identity)
 
     assert excinfo.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_callback_falls_back_to_the_state_cookie():
+    """TrueConf Server 5.5 hands the callback a bare `?code=...` with no
+    `state` (confirmed against the deployed server), so the signed state
+    the login step also stashed in a cookie is what has to carry
+    `return_to` and the CSRF nonce through.
+    """
+    state = router._state_serializer.dumps({"nonce": "n", "return_to": None})
+    exchanged = {}
+
+    class _StubClient:
+        async def exchange_code(self, code):
+            exchanged["code"] = code
+            return "access-token"
+
+        async def fetch_profile(self, _token):
+            return SimpleNamespace(subject="tc-subject", display_label="TC User")
+
+    async def _provision(_session, subject, label):
+        return Identity(id=uuid4(), trueconf_subject=subject, display_label=label)
+
+    with (
+        mock.patch.object(router, "_oauth_client", lambda: _StubClient()),
+        mock.patch.object(router, "get_or_provision_identity", _provision),
+    ):
+        response = await router.callback(code="the-code", state=None, tc_oauth_state=state, session=None)
+
+    assert exchanged["code"] == "the-code"
+    assert response.status_code in (302, 307)
+
+
+@pytest.mark.asyncio
+async def test_callback_rejects_a_missing_state_everywhere():
+    with pytest.raises(HTTPException) as excinfo:
+        await router.callback(code="the-code", state=None, tc_oauth_state=None, session=None)
+
+    assert excinfo.value.status_code == 400
+
+
+def test_dig_reads_the_nested_me_payload():
+    """TrueConf 5.5's /api/v4/me nests the profile under "user" -- the
+    claim settings are dotted paths for exactly that reason.
+    """
+    payload = {"user": {"id": "oleg_ai@tc", "display_name": "Oleg"}, "admin": False}
+
+    assert _dig(payload, "user.id") == "oleg_ai@tc"
+    assert _dig(payload, "user.display_name") == "Oleg"
+    assert _dig(payload, "admin") is False
+
+
+def test_dig_returns_none_for_paths_that_are_not_there():
+    assert _dig({"user": {"id": 1}}, "user.display_name") is None
+    assert _dig({"user": {"id": 1}}, "nope.id") is None
+    # A non-dict partway down is a miss, not a TypeError.
+    assert _dig({"user": "not-a-dict"}, "user.id") is None
+
+
+def test_client_from_env_defaults_to_the_endpoint_a_user_token_can_read(monkeypatch):
+    """/api/v4/users/self is admin-only and 403s for a user's own OAuth
+    token -- the default has to be the endpoint that actually works.
+    """
+    for name, value in {
+        "TRUECONF_BASE_URL": "https://trueconf.internal",
+        "TRUECONF_OAUTH_CLIENT_ID": "cid",
+        "TRUECONF_OAUTH_CLIENT_SECRET": "secret",
+        "TRUECONF_OAUTH_REDIRECT_URI": "https://trueconf.internal/v1/auth/callback",
+    }.items():
+        monkeypatch.setenv(name, value)
+    for name in ("TRUECONF_USERINFO_PATH", "TRUECONF_USERINFO_SUBJECT_FIELD", "TRUECONF_USERINFO_DISPLAY_FIELD"):
+        monkeypatch.delenv(name, raising=False)
+
+    client = client_from_env()
+
+    assert client.userinfo_path == "/api/v4/me"
+    assert client.subject_field == "user.id"
+    assert client.display_field == "user.display_name"
+
+
+def test_bootstrap_admin_is_off_unless_explicitly_enabled(monkeypatch):
+    monkeypatch.delenv("AUTH_BOOTSTRAP_FIRST_ADMIN", raising=False)
+    assert repository._bootstrap_admin_enabled() is False
+
+    monkeypatch.setenv("AUTH_BOOTSTRAP_FIRST_ADMIN", "true")
+    assert repository._bootstrap_admin_enabled() is True
+
+    monkeypatch.setenv("AUTH_BOOTSTRAP_FIRST_ADMIN", "false")
+    assert repository._bootstrap_admin_enabled() is False

@@ -7,9 +7,18 @@ services:
     restart: unless-stopped
     ports:
       - "${TRUECONF_TLS_PORT:-8443}:443"
-    networks: [trueconf-tls]
+      - "${FRONTEND_TLS_PORT:-8543}:8543"
+    networks: [trueconf-tls, platform]
 
 networks:
+  # Owned by platform/docker-compose.yml -- joined here only to reach
+  # monitoring-platform for the /v1/auth/callback location, and
+  # monitoring-frontend (which joins the same network) for the :8543
+  # server block, both in nginx.conf.
+  platform:
+    name: platform_platform
+    external: true
+
   # trueconf-server (a plain `docker run`, not managed by any compose file
   # -- see trueconf/README.md on why) must be attached to this network
   # too, but *without* recreating it: `docker network connect trueconf-tls

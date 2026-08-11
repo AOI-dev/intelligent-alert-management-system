@@ -120,22 +120,32 @@ async def handle_alert(message: MessageEnvelope) -> None:
         await log_alert(session, message.message_id, message.occurred_at, message.correlation_id, message.data)
 
     alert = MonitoringAlert.model_validate(message.data)
-    routed: list[Decision] = []
-    for decision in await plugin_engine.process(alert):
+    # Both engines run: PluginEngine is the real path, correlation_engine is
+    # the legacy one kept available until the plugin path is fully validated.
+    # They now run the SAME policy (PLUGIN_PATHS registers
+    # FlapAwareCorrelatorPlugin, which wraps what correlation_engine defaults
+    # to), so without deduplication every decision would be published twice --
+    # doubling the decisions topic, decision_log, and the decisions_total
+    # metric, and paging the on-call twice per incident.
+    #
+    # Deduplicating on (type, alert_id, action) rather than picking one engine
+    # keeps this correct for any PLUGIN_PATHS: an engine contributing nothing
+    # (PassThroughCorrelator) or a plugin the legacy path has no equivalent
+    # for both behave sensibly.
+    seen: set[tuple[str, str, str]] = set()
+    decisions_for_alert: list[Decision] = []
+    for decision in (*await plugin_engine.process(alert), *correlation_engine.process(alert)):
+        identity = (decision.decision_type, str(decision.alert_id), decision.action)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        decisions_for_alert.append(decision)
         await publish_decision(decision, message.correlation_id)
-        if decision.decision_type == "route":
-            routed.append(decision)
-    # Legacy pipeline kept available until plugin engine is fully validated.
-    for decision in correlation_engine.process(alert):
-        await publish_decision(decision, message.correlation_id)
-        if decision.decision_type == "route":
-            routed.append(decision)
-    if NOTIFICATIONS_ENABLED and routed:
-        # Both engines run, so both can route the same alert (they publish
-        # duplicate decisions today by design). Notify on the first only --
-        # otherwise registering FlapAwareCorrelatorPlugin in PLUGIN_PATHS
-        # would silently start paging the on-call twice per incident.
-        asyncio.create_task(notify_for_decision(routed[0], alert, message.correlation_id))
+
+    if NOTIFICATIONS_ENABLED:
+        for decision in decisions_for_alert:
+            if decision.decision_type == "route":
+                asyncio.create_task(notify_for_decision(decision, alert, message.correlation_id))
     if AI_ENRICHMENT_MODE != "off":
         asyncio.create_task(enrich_alert(alert, message.correlation_id))
 
