@@ -7,7 +7,7 @@
 #
 # Every visitor sees a one-time browser warning to click through (expected
 # with any self-signed cert); this only exists to satisfy TrueConf
-# Server's own "authorization requires HTTPS" check on the /oauth/authorize
+# Server's own "authorization requires HTTPS" check on the /oauth2/authorize
 # step, not to make the connection trusted end to end.
 set -euo pipefail
 cd "$(dirname "$0")"

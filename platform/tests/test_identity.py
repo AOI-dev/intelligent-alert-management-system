@@ -26,7 +26,7 @@ def test_authorize_url_carries_required_params():
 
     assert parsed.scheme == "https"
     assert parsed.netloc == "trueconf.internal"
-    assert parsed.path == "/oauth/authorize"
+    assert parsed.path == "/oauth2/authorize"
     assert query["response_type"] == ["code"]
     assert query["client_id"] == ["the-client-id"]
     assert query["redirect_uri"] == ["http://localhost:8100/v1/auth/callback"]

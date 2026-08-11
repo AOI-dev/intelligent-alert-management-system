@@ -4,7 +4,7 @@ A self-signed HTTPS front door for `trueconf-server`, and nothing else.
 
 ## Why this exists
 
-TrueConf Server's OAuth2 `/oauth/authorize` step refuses to run over
+TrueConf Server's OAuth2 `/oauth2/authorize` step refuses to run over
 plain HTTP ("Authorization requires HTTPS to ensure your data safety").
 `trueconf-server`'s own HTTPS port (443) was never actually configured
 with a certificate (see `trueconf/README.md` — its webmanager dir, where

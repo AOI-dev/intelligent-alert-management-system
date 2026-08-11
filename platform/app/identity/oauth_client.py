@@ -57,7 +57,9 @@ class TrueConfOAuthClient:
                 "state": state,
             }
         )
-        return f"{self.base_url}/oauth/authorize?{params}"
+        # TrueConf Server 5.5 serves its OAuth UI under /oauth2/authorize.
+        # The older /oauth/authorize path returns 404 on the deployed server.
+        return f"{self.base_url}/oauth2/authorize?{params}"
 
     async def exchange_code(self, code: str) -> str:
         async with httpx.AsyncClient(timeout=10, verify=self.verify_ssl) as client:
