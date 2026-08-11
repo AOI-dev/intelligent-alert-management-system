@@ -44,6 +44,17 @@ def test_client_from_env_reads_all_required_vars(monkeypatch):
     assert client.base_url == "https://trueconf.internal"
     assert client.client_id == "cid"
     assert client.userinfo_path == "/api/v4/users/self"
+    assert client.verify_ssl is True  # secure by default
+
+
+def test_client_from_env_verify_ssl_false_only_when_explicitly_set(monkeypatch):
+    monkeypatch.setenv("TRUECONF_BASE_URL", "https://trueconf.internal")
+    monkeypatch.setenv("TRUECONF_OAUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("TRUECONF_OAUTH_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("TRUECONF_OAUTH_REDIRECT_URI", "http://localhost/cb")
+    monkeypatch.setenv("TRUECONF_VERIFY_SSL", "false")
+
+    assert client_from_env().verify_ssl is False
 
 
 def test_client_from_env_missing_var_raises(monkeypatch):

@@ -24,15 +24,3 @@ def enrichment_request() -> EnrichmentRequest:
         deadline_at="2099-01-01T00:00:00Z",
         feature_mode="suggest",
     )
-
-
-def mock_llm_classification_response() -> dict:
-    """Example structured output an internal LLM might return."""
-    return {
-        "classification": "database_degradation",
-        "priority": "p2",
-        "root_cause": "slow_query_on_orders_table",
-        "confidence": 0.87,
-        "explanation": "Latency spike correlates with disk queue depth on the primary database.",
-        "recommended_team": "db-oncall",
-    }

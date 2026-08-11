@@ -1,0 +1,20 @@
+name: trueconf-tls
+
+services:
+  proxy:
+    build: .
+    container_name: trueconf-tls-proxy
+    restart: unless-stopped
+    ports:
+      - "${TRUECONF_TLS_PORT:-8443}:443"
+    networks: [trueconf-tls]
+
+networks:
+  # trueconf-server (a plain `docker run`, not managed by any compose file
+  # -- see trueconf/README.md on why) must be attached to this network
+  # too, but *without* recreating it: `docker network connect trueconf-tls
+  # trueconf-server` after this stack is first up. See this stack's own
+  # README.md for the full one-time setup sequence and why recreating
+  # that container isn't an option here.
+  trueconf-tls:
+    name: trueconf-tls_trueconf-tls

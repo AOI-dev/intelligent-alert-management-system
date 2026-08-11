@@ -1,61 +1,106 @@
-"""Happy-path tests for the AI enrichment contour.
+"""AI enrichment contour tests, in two layers.
 
-The AI module currently only defines ports (app/ai/ports.py:
-EnrichmentPublisher, EnrichmentResultHandler) -- no worker calls a real LLM
-anywhere yet, vLLM env vars notwithstanding (see platform/flags.env; no
-client code reads them). test_mock_response_satisfies_oracle is xfail on
-purpose: _to_result below is a parser this test file invents for itself,
-not anything in app/ai/, so without the xfail it would pass by
-construction regardless of whether real enrichment exists -- a mock
-tested against itself, same trap tests/core/test_core.py's oracle tests
-were in before FlapAwareCorrelator actually existed to satisfy them. Once
-a real service parses a real LLM response through real app/ai/ code, wire
-this test to call that instead of _to_result and drop the xfail -- same
-transition test_core.py already went through.
+Unit layer (always runs): EnrichmentService's parsing, vocabulary, and
+never-raise guarantees, with the HTTP client replaced by an in-process
+stub. This is the layer that protects the deterministic alert path: the
+model may say anything, and the contract must still hold.
+
+Live layer (-m live, requires VLLM_TEST=1): runs the real app/ai/ code —
+prompt builder, vLLM client, parser — against the deployed model and
+asserts the *contract* the rest of the platform relies on (valid
+vocabulary, bounded confidence, non-empty explanation). It deliberately
+does NOT pin one exact answer: a 4B model's specific classification is not
+a stable assertion target, and a test that fails whenever the model is
+merely mediocre teaches everyone to ignore it. Judging whether the answers
+are actually *good* is what `pytest -m eval` is for (separate, opt-in).
 """
+import os
+
 import pytest
 
-from tests.ai.fixtures import enrichment_request, mock_llm_classification_response
-from tests.ai.oracle import ORACLE
+from app.ai.client import AIClientError
+from app.ai.service import CLASSIFICATIONS, PRIORITIES, EnrichmentService
+from tests.ai.fixtures import enrichment_request
+
+LIVE_ENABLED = os.environ.get("VLLM_TEST") == "1"
+live = pytest.mark.skipif(not LIVE_ENABLED, reason="live vLLM tests disabled (set VLLM_TEST=1)")
 
 
-def _to_result(alert_id, capability: str, response: dict) -> dict:
-    """Stand-in only -- not app/ai/ code. See module docstring."""
-    return {
-        "alert_id": str(alert_id),
-        "capability": capability,
-        "confidence": response.get("confidence", 0.0),
-        "explanation": response.get("explanation", ""),
-        "model_name": "mock-llm",
-        "model_version": "0.1.0",
-        "recommendation": response.get(f"expected_{capability}") or response.get(capability),
+class StubClient:
+    """In-process stand-in for app.ai.client.LLMClient."""
+
+    def __init__(self, reply: dict | None = None, error: Exception | None = None):
+        self._reply = reply
+        self._error = error
+
+    async def chat_json(self, messages, max_tokens=512):
+        if self._error:
+            raise self._error
+        return self._reply, "stub-model"
+
+
+@pytest.mark.asyncio
+async def test_model_failure_falls_back_without_raising():
+    service = EnrichmentService(client=StubClient(error=AIClientError("boom")))
+    results = await service.enrich(enrichment_request())
+
+    assert len(results) == 3
+    for result in results:
+        assert result.confidence == 0.0
+        assert result.recommendation is None
+        assert "unavailable" in result.explanation
+
+
+@pytest.mark.asyncio
+async def test_out_of_vocabulary_answer_is_discarded_not_passed_through():
+    reply = {
+        "classification": "definitely_a_database_thing",
+        "priority": "urgent!!!",
+        "root_cause": "slow query on the orders table",
+        "confidence": 4.7,
+        "explanation": "because reasons",
     }
+    service = EnrichmentService(client=StubClient(reply=reply))
+    results = await service.enrich(enrichment_request())
+    by_capability = {r.capability: r for r in results}
+
+    assert by_capability["classification"].recommendation is None
+    assert by_capability["priority"].recommendation is None
+    # Free-text root cause survives; enum fields don't.
+    assert by_capability["root_cause"].recommendation == "slow query on the orders table"
+    # Confidence is clamped into the contract's [0, 1] whatever the model said.
+    assert all(0.0 <= r.confidence <= 1.0 for r in results)
 
 
-@pytest.mark.xfail(
-    reason="no real enrichment service exists yet -- this only proves a test-local mock parser "
-    "satisfies the oracle, not any app/ai/ code; see module docstring",
-    strict=True,
-)
-@pytest.mark.parametrize("capability", ["classification", "priority", "root_cause"])
-def test_mock_response_satisfies_oracle(capability: str):
-    request = enrichment_request()
-    oracle = ORACLE[capability]
-    response = mock_llm_classification_response()
-    result = _to_result(request.alert.alert_id, capability, response)
+@pytest.mark.asyncio
+async def test_partial_reply_yields_partial_results():
+    service = EnrichmentService(client=StubClient(reply={"classification": "database"}))
+    results = await service.enrich(enrichment_request())
+    by_capability = {r.capability: r for r in results}
 
-    assert result["capability"] == oracle.capability
-    assert result["confidence"] >= oracle.min_confidence
-    if oracle.expected_classification:
-        assert result["recommendation"] == oracle.expected_classification
-    if oracle.expected_priority:
-        assert result["recommendation"] == oracle.expected_priority
-    if oracle.requires_explanation:
-        assert result["explanation"]
+    assert by_capability["classification"].recommendation == "database"
+    assert by_capability["priority"].recommendation is None
+    assert all(r.explanation for r in results)
 
 
-def test_enrichment_request_carries_alert_and_capabilities():
-    request = enrichment_request()
-    assert request.alert.rule == "api-latency"
-    assert "classification" in request.requested_capabilities
-    assert request.feature_mode == "suggest"
+@pytest.mark.live
+@live
+@pytest.mark.asyncio
+async def test_live_enrichment_satisfies_contract():
+    """The real model, through the real app/ai/ code path. Asserts the
+    contract every caller of EnrichmentService relies on — nothing more."""
+    from app.ai.service import EnrichmentService as LiveService
+
+    service = LiveService()
+    results = await service.enrich(enrichment_request())
+
+    assert {r.capability for r in results} == {"classification", "priority", "root_cause"}
+    for result in results:
+        assert str(result.alert_id)
+        assert 0.0 <= result.confidence <= 1.0
+        assert result.explanation
+        assert result.model_name
+        if result.capability == "classification":
+            assert result.recommendation in CLASSIFICATIONS
+        if result.capability == "priority":
+            assert result.recommendation in PRIORITIES

@@ -30,6 +30,7 @@ class TrueConfOAuthClient:
         userinfo_path: str = "/api/v4/users/self",
         subject_field: str = "id",
         display_field: str = "displayName",
+        verify_ssl: bool = True,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.client_id = client_id
@@ -38,6 +39,14 @@ class TrueConfOAuthClient:
         self.userinfo_path = userinfo_path
         self.subject_field = subject_field
         self.display_field = display_field
+        # False only for the self-signed cert trueconf-tls/ uses (no
+        # domain name for this VM means no publicly-trusted cert is
+        # possible -- see that stack's README). The browser accepts a
+        # self-signed cert with a one-time click-through warning; httpx
+        # here has no such prompt, so it needs telling explicitly not to
+        # reject it. Never set this False against a real, publicly-trusted
+        # TrueConf deployment.
+        self.verify_ssl = verify_ssl
 
     def authorize_url(self, state: str) -> str:
         params = httpx.QueryParams(
@@ -51,7 +60,7 @@ class TrueConfOAuthClient:
         return f"{self.base_url}/oauth/authorize?{params}"
 
     async def exchange_code(self, code: str) -> str:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, verify=self.verify_ssl) as client:
             response = await client.post(
                 f"{self.base_url}/oauth/token",
                 data={
@@ -66,7 +75,7 @@ class TrueConfOAuthClient:
             return response.json()["access_token"]
 
     async def fetch_profile(self, access_token: str) -> TrueConfProfile:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, verify=self.verify_ssl) as client:
             response = await client.get(
                 f"{self.base_url}{self.userinfo_path}",
                 headers={"Authorization": f"Bearer {access_token}"},
@@ -88,4 +97,5 @@ def client_from_env() -> TrueConfOAuthClient:
         userinfo_path=os.environ.get("TRUECONF_USERINFO_PATH", "/api/v4/users/self"),
         subject_field=os.environ.get("TRUECONF_USERINFO_SUBJECT_FIELD", "id"),
         display_field=os.environ.get("TRUECONF_USERINFO_DISPLAY_FIELD", "displayName"),
+        verify_ssl=os.environ.get("TRUECONF_VERIFY_SSL", "true").lower() != "false",
     )

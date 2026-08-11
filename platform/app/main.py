@@ -294,7 +294,7 @@ async def contours() -> dict:
         "plugins": [m.name for m in plugin_registry.all_metadata],
         "monitoring": f"bounded in-memory live-tail read model; TimescaleDB history projection ({app.state.monitoring_db_status})",
         "routing": "port reserved; no delivery adapter",
-        "ai": "Kafka extension topics reserved; no worker required",
+        "ai": "EnrichmentService (app/ai/) implemented and tested against a stub + the real vLLM server; not yet wired to a Kafka consumer, so nothing calls it in production yet",
         "identity": f"TrueConf OAuth2 + role table ({app.state.identity_status})",
     }
 

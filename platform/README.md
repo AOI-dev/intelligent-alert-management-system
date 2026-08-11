@@ -51,8 +51,16 @@ page at `http://<host>:8100/`.
   Delivery itself, once routing publishes `notification.requested`, is
   handled by the separate `notifications` dispatcher stack (see
   `notifications/README.md`), not by code in this monolith.
-- **AI**: reserved Kafka request/result topics for horizontally scalable worker
-  groups; no model or worker is required for the deterministic path.
+- **AI**: `EnrichmentService`/`LLMClient` (`app/ai/service.py`, `app/ai/client.py`)
+  call the vLLM server (`VLLM_BASE_URL`/`VLLM_API_KEY`) and never raise —
+  a model outage or an out-of-vocabulary reply produces a valid fallback
+  `EnrichmentResult` instead, same "must not block or break the
+  deterministic path" principle as `app/plugins/engine.py`. Tested two
+  ways: an always-on unit layer against an in-process stub, and an opt-in
+  live layer against the real deployed model (`pytest -m live`, needs
+  `VLLM_TEST=1`). Not yet wired to a Kafka consumer — reserved topics
+  still exist, but nothing in production calls this yet; that's the
+  remaining step to turn this from "implemented" into "in the loop."
 - **Core**: `app/core/` runs every consumed alert through a per-alert stage
   (identity by default), then a per-sequence stage over a `TimeBoundedWindow`
   keyed by correlation_id label, then service label, then `(source, metric)`
