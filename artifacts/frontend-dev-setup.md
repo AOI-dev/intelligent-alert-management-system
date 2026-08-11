@@ -65,17 +65,38 @@ Go to **http://localhost:8091** in a browser. You should see the
 (Alerts / Events / Decisions / Incidents).
 
 Expected, not a bug:
-- The tables likely show **"Not logged in"** — that's correct unless
-  you've logged in via TrueConf (see below). The 401-handling itself is
-  what you're often testing/building against.
+- The tables show **"Not logged in"** — this is the normal state for this
+  setup, and it will **stay** that way; see "Why you can't log in from
+  here" below, this isn't something to debug.
 - The **Incidents** tab always shows "Not implemented yet (501)" — that's
   intentional, not an error. That feature genuinely doesn't exist on the
   backend yet; the frontend is supposed to say so honestly rather than
   show a fake empty table.
-- If you want to see real logged-in data (alerts/events actually
-  populated), you need a TrueConf login on the platform's TrueConf server
-  — ask for a test account, or use the "Log in" link and log in with
-  credentials you're given.
+
+### Why you can't log in from here (and don't need to, for most work)
+
+Clicking "Log in" here will not work, and it's not a bug to fix — it's a
+real limit of how OAuth2 login works, not something specific to this
+project. TrueConf's login flow always sends you back to a single,
+pre-registered address (`161.104.107.172:8100`, the deployed backend) —
+that's a security requirement of OAuth2 itself, not a choice made here.
+Your browser then has a valid login only for that address, never for
+`localhost:8091`, no matter what the frontend container proxies to
+server-side.
+
+What this means in practice: everything in steps 1-6 covers the vast
+majority of frontend work — layout, the tables, the "not logged in" state
+itself, the "not implemented" state, styling, adding columns. All of that
+develops fine here, live-edited, with nothing more to set up.
+
+For the *smaller* slice of work that specifically needs to see real
+logged-in data (alerts/events actually populated, testing what a signed-in
+view looks like): open **http://161.104.107.172:8091** instead (the
+already-deployed dashboard, same host as the backend, where login
+actually works) — or, if you're testing a change you made locally, publish
+it first (see "Publishing your changes" below) and check it there. Ask for
+a TrueConf test login when you get to this point; you don't need one
+before then.
 
 If step 4 doesn't show the page at all: check `docker compose logs web`
 for errors, and confirm `curl http://161.104.107.172:8100/health` returns
