@@ -9,7 +9,11 @@ if [ -e .env ]; then
 	exit 1
 fi
 
-gen() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; }
+# `|| true` matters here: under `set -o pipefail` above, `head -c 32`
+# closing the pipe early can send `tr` a SIGPIPE, which pipefail then
+# reports as the pipeline failing (exit 141) even though head already
+# captured the bytes it needed -- an intermittent race, not a real error.
+gen() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 || true; }
 
 sed \
 	-e "s|^TRUECONF_ADMIN_PASSWORD=.*|TRUECONF_ADMIN_PASSWORD=$(gen)|" \

@@ -19,6 +19,7 @@ from app.plugins.builtins.webhooks import AlertmanagerWebhookSource, ZabbixWebho
 from app.plugins.engine import PluginEngine
 from app.plugins.registry import PluginRegistry
 from app.identity.db import SessionLocal, init_models
+from app.identity.db import _engine as identity_engine
 from app.identity.dependencies import require_role
 from app.identity.models import Identity
 from app.identity.repository import ensure_seed_roles
@@ -28,6 +29,7 @@ from app.integration.kafka_consumer import KafkaTopicConsumer
 from app.integration.kafka_producer import KafkaProducer
 from app.integration.normalizers import normalize_zabbix_problem, to_event_data
 from app.integration.zabbix import ZabbixApiClient
+from app.monitoring.persistence import init_monitoring_models, log_alert, log_decision, log_event
 from app.monitoring.query import filter_messages, find_by_field, summarize
 from app.monitoring.store import MessageStore
 
@@ -66,6 +68,8 @@ async def handle_event(message: MessageEnvelope) -> None:
     event = MonitoringEvent.model_validate(message.data)
     if filter_service.accept(event) and events.add(message.model_dump(mode="json")):
         consumed_total.labels(topic=EVENTS_TOPIC, outcome="accepted").inc()
+        async with SessionLocal() as session:
+            await log_event(session, message.message_id, message.occurred_at, message.correlation_id, message.data)
     else:
         consumed_total.labels(topic=EVENTS_TOPIC, outcome="duplicate_or_filtered").inc()
 
@@ -75,6 +79,8 @@ async def handle_alert(message: MessageEnvelope) -> None:
         consumed_total.labels(topic=ALERTS_TOPIC, outcome="duplicate").inc()
         return
     consumed_total.labels(topic=ALERTS_TOPIC, outcome="accepted").inc()
+    async with SessionLocal() as session:
+        await log_alert(session, message.message_id, message.occurred_at, message.correlation_id, message.data)
 
     alert = MonitoringAlert.model_validate(message.data)
     for decision in await plugin_engine.process(alert):
@@ -94,6 +100,8 @@ DECISION_MESSAGE_TYPES: dict[str, Literal["decision.dedup", "decision.route", "d
 async def publish_decision(decision: Decision, correlation_id: UUID) -> None:
     decisions.add(decision.model_dump(mode="json"))
     decisions_total.labels(decision_type=decision.decision_type).inc()
+    async with SessionLocal() as session:
+        await log_decision(session, datetime.now(timezone.utc), correlation_id, decision.model_dump(mode="json"))
     producer: KafkaProducer | None = app.state.producer
     if producer is None:
         return
@@ -186,6 +194,17 @@ async def lifespan(app: FastAPI):
         logger.exception("Identity database unavailable")
         app.state.identity_status = f"unavailable: {error.__class__.__name__}"
 
+    # Separate status/try-except from identity above: this is a distinct
+    # concern (hypertable/extension setup can fail independently of plain
+    # table creation, e.g. against a non-Timescale Postgres) and a failure
+    # here must not get misreported as an identity DB problem.
+    try:
+        await init_monitoring_models(identity_engine)
+        app.state.monitoring_db_status = "connected"
+    except Exception as error:
+        logger.exception("Monitoring TimescaleDB projection unavailable")
+        app.state.monitoring_db_status = f"unavailable: {error.__class__.__name__}"
+
     producer = KafkaProducer(KAFKA_BOOTSTRAP_SERVERS)
     event_consumer = KafkaTopicConsumer(
         KAFKA_BOOTSTRAP_SERVERS, EVENTS_TOPIC, f"{CONSUMER_GROUP}-events", handle_event
@@ -252,7 +271,12 @@ ANY_AUTHENTICATED_ROLE = require_role("viewer", "engineer", "admin")
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "kafka": app.state.kafka_status, "identity_db": app.state.identity_status}
+    return {
+        "status": "ok",
+        "kafka": app.state.kafka_status,
+        "identity_db": app.state.identity_status,
+        "monitoring_db": app.state.monitoring_db_status,
+    }
 
 
 @app.get("/v1/contours")
@@ -268,7 +292,7 @@ async def contours() -> dict:
         "alerts": "Kafka alert projection active",
         "core": "rolling-window pipeline wired to live alerts; FlapAwareCorrelator dedups/correlates/suppresses (app/core/correlation_automaton.py)",
         "plugins": [m.name for m in plugin_registry.all_metadata],
-        "monitoring": "bounded in-memory read model; TimescaleDB deferred",
+        "monitoring": f"bounded in-memory live-tail read model; TimescaleDB history projection ({app.state.monitoring_db_status})",
         "routing": "port reserved; no delivery adapter",
         "ai": "Kafka extension topics reserved; no worker required",
         "identity": f"TrueConf OAuth2 + role table ({app.state.identity_status})",

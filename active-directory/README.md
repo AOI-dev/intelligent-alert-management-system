@@ -60,8 +60,10 @@ To do it by hand instead (e.g. one specific account):
 ```sh
 docker compose exec samba-ad-dc samba-tool user create ad-synthetic-000 CHANGEME123 \
   --given-name="Synthetic" --surname="NocA" --department=NOC
-docker compose exec samba-ad-dc samba-tool group addmembers "Domain Users" ad-synthetic-000
 ```
+
+(No separate `group addmembers "Domain Users"` step -- Samba assigns every
+new user that group automatically as their primary group at creation.)
 
 ## When/if this gets wired in
 

@@ -26,8 +26,27 @@ page at `http://<host>:8100/`.
   `threshold` to be present, not optional).
 - **Filtering**: pass-through service boundary for later noise/storm policy.
 - **Alerts**: alert projection and query API.
-- **Monitoring**: bounded in-memory event/alert history. TimescaleDB replaces
-  this projection in a later increment.
+- **Monitoring**: two deliberately separate stores, not one stretched to
+  cover both jobs (see "Frontend query endpoints" below for the design
+  reasoning) — a bounded in-memory live-tail cache (`MessageStore`, what
+  `/v1/events`/`/v1/alerts`/`/v1/decisions` read from), and a persistent
+  TimescaleDB projection (`app/monitoring/models.py`/`persistence.py`):
+  every accepted event/alert/decision is also written to an
+  `event_log`/`alert_log`/`decision_log` hypertable, partitioned on
+  `occurred_at`, with a retention policy
+  (`TIMESCALE_EVENT_RETENTION_DAYS`/`_ALERT_RETENTION_DAYS`/
+  `_DECISION_RETENTION_DAYS`, defaults 90/90/400 — decisions default
+  longer since they're the audit trail, АР-08's "at least a year"). Each
+  table has a handful of known, indexed columns for what's actually
+  filtered on, plus an `extra` JSONB column for the rest of the message
+  body verbatim — so `MonitoringEvent`'s `extra="allow"` openness doesn't
+  need a schema migration to persist here too. Nothing reads from these
+  tables yet (no range-query API endpoint) — writing history is this
+  increment; querying it is the next one. A write failure here is logged
+  and swallowed, never raised into the Kafka handler — the same "must not
+  block or break the deterministic path" principle already applied to
+  plugins in `app/plugins/engine.py`, applied to this store too. Status
+  visible at `GET /health`'s `monitoring_db` field.
 - **Routing**: reserved notification-delivery boundary; no provider is called.
   Delivery itself, once routing publishes `notification.requested`, is
   handled by the separate `notifications` dispatcher stack (see

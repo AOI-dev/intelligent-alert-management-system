@@ -12,6 +12,15 @@ services:
       NOCOMPLEXITY: "true"
       INSECURELDAP: "true"
     hostname: samba-ad-dc
+    # Required by the image itself (see its Docker Hub docs) -- Samba's AD
+    # DC provisioning sets NT ACLs/xattrs on sysvol that plain cap_add
+    # doesn't cover; without this it crash-loops on provisioning with
+    # "set_nt_acl_no_snum: ... NT_STATUS_ACCESS_DENIED" (confirmed by
+    # actually deploying this stack for the first time). No host ports are
+    # published and this network is otherwise isolated (see README), which
+    # bounds the exposure, but this is still a real privilege escalation
+    # worth knowing is here, not something to wave past.
+    privileged: true
     cap_add:
       - NET_ADMIN
     volumes:
