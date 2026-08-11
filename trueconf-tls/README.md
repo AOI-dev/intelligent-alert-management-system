@@ -71,6 +71,34 @@ so far was specifically about the `/oauth/authorize` step), `platform`
 itself would need the same treatment, which this stack doesn't attempt to
 predict or solve preemptively.
 
+## TLS alone isn't enough — TrueConf must also be told it's behind a proxy
+
+Getting this stack up still left `/oauth/authorize` failing with
+"Authorization requires HTTPS" even when the browser was on
+`https://161.104.107.172:8443`. Cause: `trueconf-server`'s own
+`/opt/trueconf/server/etc/manager/manager.toml` has a `[proxy]` section
+that defaults to `enabled = false`. With it disabled, TrueConf builds its
+notion of the request's scheme from what it *itself* received — plain
+HTTP from this stack's nginx — regardless of what the browser actually
+used, so the HTTPS check fails no matter how solid the front-door TLS is.
+
+Fix (confirmed live): inside the running container —
+
+```sh
+docker exec trueconf-server sed -i \
+  "s/address = 'localhost:8443'/address = '161.104.107.172:8443'/; s/enabled = false/enabled = true/" \
+  /opt/trueconf/server/etc/manager/manager.toml
+docker exec trueconf-server supervisorctl restart trueconf-manager
+```
+
+This restarts only the `trueconf-manager` supervisor process, not the
+container — same license-safety property as `trueconf/start.sh`. This
+file lives in the container's own filesystem, not a host bind mount (see
+`trueconf/README.md` — the webmanager/etc dir is deliberately unmounted),
+so there's no way to author it locally first; **it will need to be
+reapplied if `trueconf-server` is ever recreated** (`remove.sh` + fresh
+`run.sh`, an image update, etc.) since nothing here persists it.
+
 ## Renewing / regenerating the cert
 
 `gen-cert.sh` refuses to overwrite an existing `certs/tls.crt`. To

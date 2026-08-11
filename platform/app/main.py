@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -11,7 +11,18 @@ from fastapi.responses import FileResponse
 from prometheus_client import Counter
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app.contracts.messages import Decision, MessageEnvelope, MonitoringAlert, MonitoringEvent
+from app.ai.client import configured as ai_configured
+from app.ai.service import EnrichmentService
+from app.contracts.messages import (
+    AI_REQUESTS_TOPIC,
+    AI_RESULTS_TOPIC,
+    Decision,
+    EnrichmentRequest,
+    EnrichmentResult,
+    MessageEnvelope,
+    MonitoringAlert,
+    MonitoringEvent,
+)
 from app.core.pipeline import CorrelationEngine
 from app.core.rate_limit import RateLimitMiddleware, RateLimitRule
 from app.filtering.service import EventFilter
@@ -47,6 +58,11 @@ RATE_LIMIT_WEBHOOK_CAPACITY = float(os.environ.get("RATE_LIMIT_WEBHOOK_CAPACITY"
 RATE_LIMIT_WEBHOOK_REFILL_PER_SECOND = float(os.environ.get("RATE_LIMIT_WEBHOOK_REFILL_PER_SECOND", "5"))
 RATE_LIMIT_API_CAPACITY = float(os.environ.get("RATE_LIMIT_API_CAPACITY", "120"))
 RATE_LIMIT_API_REFILL_PER_SECOND = float(os.environ.get("RATE_LIMIT_API_REFILL_PER_SECOND", "20"))
+# AI enrichment is off unless explicitly enabled (see flags.env): the rest of
+# the pipeline must be provably correct on its own before a model's output is
+# allowed anywhere near it.
+AI_ENRICHMENT_MODE = os.environ.get("AI_ENRICHMENT_MODE", "off")
+AI_ENRICHMENT_TIMEOUT = float(os.environ.get("AI_ENRICHMENT_TIMEOUT_SECONDS", "30"))
 
 filter_service = EventFilter()
 plugin_registry = PluginRegistry.from_env(
@@ -54,6 +70,7 @@ plugin_registry = PluginRegistry.from_env(
 )
 plugin_engine = PluginEngine(plugin_registry)
 correlation_engine = CorrelationEngine()
+enrichment_service = EnrichmentService()
 events = MessageStore(HISTORY_LIMIT)
 alerts = MessageStore(HISTORY_LIMIT)
 decisions = MessageStore(HISTORY_LIMIT)
@@ -88,6 +105,75 @@ async def handle_alert(message: MessageEnvelope) -> None:
     # Legacy pipeline kept available until plugin engine is fully validated.
     for decision in correlation_engine.process(alert):
         await publish_decision(decision, message.correlation_id)
+    if AI_ENRICHMENT_MODE != "off":
+        asyncio.create_task(enrich_alert(alert, message.correlation_id))
+
+
+async def enrich_alert(alert: MonitoringAlert, correlation_id: UUID) -> None:
+    """Fire-and-forget AI enrichment for one accepted alert.
+
+    Runs detached from handle_alert: the deterministic path (store,
+    correlate, decide) has already completed before this starts, and a slow
+    or dead model must never back-pressure alert consumption. The request
+    envelope is published to AI_REQUESTS_TOPIC so the job is auditable and
+    a future horizontally scalable worker group can take it over without a
+    contract change (the in-process call below is the current worker);
+    results land on AI_RESULTS_TOPIC. On any model failure the service
+    returns a valid fallback result (confidence 0.0, explanation naming the
+    failure), which is published as-is rather than retried — the deadline
+    has already passed for this alert by then.
+    """
+    producer: KafkaProducer | None = app.state.producer
+    if producer is None:
+        return
+    request = EnrichmentRequest(
+        alert=alert,
+        requested_capabilities=["classification", "priority", "root_cause"],
+        deadline_at=datetime.now(timezone.utc) + timedelta(seconds=AI_ENRICHMENT_TIMEOUT),
+        feature_mode=AI_ENRICHMENT_MODE,
+    )
+    await producer.publish(
+        AI_REQUESTS_TOPIC,
+        MessageEnvelope(
+            message_type="ai.enrichment.request",
+            producer="platform-core",
+            correlation_id=correlation_id,
+            data=request.model_dump(mode="json"),
+        ),
+    )
+    produced_total.labels(topic=AI_REQUESTS_TOPIC, source="platform-core").inc()
+
+    try:
+        results = await asyncio.wait_for(enrichment_service.enrich(request), timeout=AI_ENRICHMENT_TIMEOUT)
+    except Exception as exc:
+        # enrich() is contract-bound never to raise (it returns fallback
+        # results on model failure), so reaching here means something
+        # unexpected — a timeout, a bug. Publish the same fallback shape so
+        # results-topic consumers always see one result per capability per
+        # request, rather than a silent gap.
+        logger.exception("enrichment failed unexpectedly for alert %s", alert.alert_id)
+        results = [
+            EnrichmentResult(
+                alert_id=alert.alert_id,
+                capability=capability,
+                confidence=0.0,
+                explanation=f"enrichment failed unexpectedly: {exc.__class__.__name__}",
+                model_name="unavailable",
+                model_version="0",
+            )
+            for capability in request.requested_capabilities
+        ]
+    for result in results:
+        await producer.publish(
+            AI_RESULTS_TOPIC,
+            MessageEnvelope(
+                message_type="ai.enrichment.result",
+                producer="platform-ai",
+                correlation_id=correlation_id,
+                data=result.model_dump(mode="json"),
+            ),
+        )
+        produced_total.labels(topic=AI_RESULTS_TOPIC, source="platform-ai").inc()
 
 
 DECISION_MESSAGE_TYPES: dict[str, Literal["decision.dedup", "decision.route", "decision.suppress"]] = {
@@ -294,7 +380,11 @@ async def contours() -> dict:
         "plugins": [m.name for m in plugin_registry.all_metadata],
         "monitoring": f"bounded in-memory live-tail read model; TimescaleDB history projection ({app.state.monitoring_db_status})",
         "routing": "port reserved; no delivery adapter",
-        "ai": "EnrichmentService (app/ai/) implemented and tested against a stub + the real vLLM server; not yet wired to a Kafka consumer, so nothing calls it in production yet",
+        "ai": (
+            f"EnrichmentService (app/ai/): mode={AI_ENRICHMENT_MODE}, vLLM "
+            f"{'configured' if ai_configured() else 'not configured'}; enrichment is "
+            "fire-and-forget off the alert path — results on monitoring.ai.results.v1"
+        ),
         "identity": f"TrueConf OAuth2 + role table ({app.state.identity_status})",
     }
 

@@ -36,6 +36,9 @@ services:
       AUTH_RETURN_TO_ALLOWLIST: ${AUTH_RETURN_TO_ALLOWLIST:-}
       VLLM_BASE_URL: ${VLLM_BASE_URL:-}
       VLLM_API_KEY: ${VLLM_API_KEY:-}
+      VLLM_MODEL: ${VLLM_MODEL:-}
+      AI_ENRICHMENT_MODE: ${AI_ENRICHMENT_MODE:-off}
+      AI_ENRICHMENT_TIMEOUT_SECONDS: ${AI_ENRICHMENT_TIMEOUT_SECONDS:-30}
     ports:
       - "${PLATFORM_PORT:-8100}:8100"
     networks: [eventsim, prometheus, zabbix, timescaledb, platform]

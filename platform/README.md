@@ -55,12 +55,22 @@ page at `http://<host>:8100/`.
   call the vLLM server (`VLLM_BASE_URL`/`VLLM_API_KEY`) and never raise —
   a model outage or an out-of-vocabulary reply produces a valid fallback
   `EnrichmentResult` instead, same "must not block or break the
-  deterministic path" principle as `app/plugins/engine.py`. Tested two
-  ways: an always-on unit layer against an in-process stub, and an opt-in
-  live layer against the real deployed model (`pytest -m live`, needs
-  `VLLM_TEST=1`). Not yet wired to a Kafka consumer — reserved topics
-  still exist, but nothing in production calls this yet; that's the
-  remaining step to turn this from "implemented" into "in the loop."
+  deterministic path" principle as `app/plugins/engine.py`. When
+  `AI_ENRICHMENT_MODE` is anything but `off` (the default), `handle_alert`
+  fires a detached enrichment task per accepted alert: the request is
+  published to `monitoring.ai.enrichment.v1`, the in-process
+  `EnrichmentService` is the current worker, and results land on
+  `monitoring.ai.results.v1`. It is deliberately fire-and-forget — the
+  deterministic decision path (store → correlate → decide) completes before
+  the task starts, so a slow or dead model never back-pressures alert
+  consumption. The topic split exists so a future horizontally scalable
+  worker group can take over the request topic without a contract change;
+  the in-process call is the worker today. Tested two ways: an always-on
+  unit layer against an in-process stub, and an opt-in live layer against
+  the real deployed model (`pytest -m live`, needs `VLLM_TEST=1`; if your
+  shell exports a proxy httpx can't parse, e.g. an `all_proxy=socks5h://…`
+  that this WSL/dev box sets, run it with the proxy vars cleared — the
+  deployed VM has no such proxy).
 - **Core**: `app/core/` runs every consumed alert through a per-alert stage
   (identity by default), then a per-sequence stage over a `TimeBoundedWindow`
   keyed by correlation_id label, then service label, then `(source, metric)`
