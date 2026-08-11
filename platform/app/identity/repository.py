@@ -24,10 +24,21 @@ async def ensure_seed_roles(session: AsyncSession) -> None:
 
 
 async def get_identity_by_id(session: AsyncSession, identity_id: UUID) -> Identity | None:
+    # populate_existing=True matters here, confirmed live: assign_role and
+    # link_ad_account both call this right after committing a change to
+    # this same identity's roles/ad_link, in the same session that
+    # require_role's own get_current_identity call already loaded this
+    # identity into (to check the caller's permissions) -- without it,
+    # SQLAlchemy's identity map returns that already-loaded instance with
+    # its now-stale relationship collections instead of re-reading them,
+    # so a role assignment's or AD-link write's own response would show
+    # the state from before the write, even though the write itself
+    # succeeded (a fresh request/session sees the correct data immediately).
     stmt = (
         select(Identity)
         .where(Identity.id == identity_id)
         .options(selectinload(Identity.roles), selectinload(Identity.ad_link))
+        .execution_options(populate_existing=True)
     )
     return (await session.execute(stmt)).scalar_one_or_none()
 
@@ -56,6 +67,10 @@ async def get_or_provision_identity(session: AsyncSession, trueconf_subject: str
 async def list_identities(session: AsyncSession) -> list[Identity]:
     stmt = select(Identity).options(selectinload(Identity.roles), selectinload(Identity.ad_link))
     return list((await session.execute(stmt)).scalars())
+
+
+async def list_roles(session: AsyncSession) -> list[Role]:
+    return list((await session.execute(select(Role).order_by(Role.id))).scalars())
 
 
 async def assign_role(session: AsyncSession, identity_id: UUID, role_id: str) -> Identity:

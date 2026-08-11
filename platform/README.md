@@ -104,7 +104,12 @@ page at `http://<host>:8100/`.
   login — see "Cross-origin login" below), `GET /v1/auth/callback`,
   `POST /v1/auth/logout`, `GET /v1/auth/me`
 - `GET /v1/identities`, `POST /v1/identities/{id}/roles`,
-  `PUT /v1/identities/{id}/ad-link` — admin role only
+  `PUT /v1/identities/{id}/ad-link`, `GET /v1/auth/roles` — admin role
+  only. `PUT .../ad-link` writes only to this platform's own
+  `ad_account_links` table — it never creates, modifies, or otherwise
+  reaches a real Active Directory account; see АР-07 and
+  `active-directory/README.md`. `frontend/public/index.html`'s Admin tab
+  is the UI for all four.
 
 ## Frontend query endpoints
 

@@ -19,11 +19,20 @@ remove it — that page is unaffected and still served directly by
 
 ## API it talks to
 
-- `GET /v1/alerts`, `GET /v1/events`, `GET /v1/decisions` — the three
-  tabs. The first two require an authenticated session (see below); a 401
-  shows a "log in" prompt instead of an empty table.
+- `GET /v1/alerts`, `GET /v1/events`, `GET /v1/decisions` — the read-only
+  tabs. Require an authenticated session (see below); a 401 shows a
+  "log in" prompt instead of an empty table.
 - `GET /v1/auth/me`, `GET /v1/auth/login`, `POST /v1/auth/logout` — the
   header's auth link.
+- `GET /v1/identities`, `GET /v1/auth/roles`, `POST /v1/identities/{id}/roles`,
+  `PUT /v1/identities/{id}/ad-link` — the Admin tab. Requires the `admin`
+  role (a 403 shows a distinct "admin role required" message, not the same
+  401 as being logged out). Role grants are real platform-only data
+  (`identity_roles`); the AD fields on that same tab are explicitly labeled
+  as a local reference copy only — this never creates or touches a real
+  Active Directory account, see `platform/README.md`'s note on the same
+  endpoint and АР-07. Doesn't auto-refresh like the other tabs, on purpose:
+  refreshing mid-edit would clobber whatever you were typing.
 
 ## Start (local or VM)
 

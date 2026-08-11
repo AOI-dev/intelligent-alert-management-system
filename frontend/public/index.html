@@ -29,6 +29,27 @@
   #summary { display:flex; gap:.6rem; margin-top:.75rem; flex-wrap:wrap; }
   #summary .chip { background:#1a2130; border:1px solid #2a3444; border-radius:.4rem; padding:.3rem .7rem; font-size:.8rem; color:#9aa8bb; }
   #summary .chip b { color:#e8edf5; }
+  #forbidden { color:#9aa8bb; margin-top:2rem; display:none; }
+  #admin-panel { display:none; margin-top:1rem; }
+  .admin-card { background:#161b26; border:1px solid #2a3444; border-radius:.5rem; padding:1rem; margin-bottom:1rem; }
+  .admin-card h3 { margin:0 0 .2rem; font-size:1rem; }
+  .admin-card .subject { color:#9aa8bb; font-size:.78rem; margin-bottom:.6rem; }
+  .admin-card .roles { display:flex; gap:.35rem; margin-bottom:.7rem; flex-wrap:wrap; }
+  .admin-card .roles .badge { text-transform:none; }
+  .admin-row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin-top:.4rem; }
+  .admin-row label { color:#9aa8bb; font-size:.78rem; min-width:5.5rem; }
+  .admin-row input, .admin-row select {
+    background:#0d1117; color:#e8edf5; border:1px solid #2a3444; border-radius:.35rem;
+    padding:.3rem .5rem; font-size:.85rem;
+  }
+  .admin-row button {
+    background:#22314a; color:#e8edf5; border:1px solid #3a4d6e; border-radius:.35rem;
+    padding:.3rem .8rem; font-size:.8rem; cursor:pointer;
+  }
+  .ad-note { color:#9aa8bb; font-size:.75rem; margin:.6rem 0 .3rem; padding-top:.5rem; border-top:1px dashed #2a3444; }
+  .admin-status { font-size:.78rem; margin-top:.3rem; min-height:1em; }
+  .admin-status.ok { color:#a9e6b8; }
+  .admin-status.error { color:#ffb4b4; }
 </style>
 </head>
 <body>
@@ -43,14 +64,17 @@
   <button data-view="events">Events</button>
   <button data-view="decisions">Decisions</button>
   <button data-view="incidents">Incidents</button>
+  <button data-view="admin">Admin</button>
 </nav>
 <div id="login-required">Session expired or not logged in yet. <a href="/v1/auth/login">Log in</a> to see live data.</div>
 <div id="not-implemented">Not implemented yet on the server (501) — not "nothing to show", genuinely not built. See the platform README's "Incidents" section.</div>
+<div id="forbidden">Admin role required — you're logged in, but this identity doesn't have the "admin" role. Ask an existing admin to grant it via this same panel.</div>
 <div id="empty">No data yet.</div>
 <table id="table" hidden>
 <thead><tr id="head"></tr></thead>
 <tbody id="rows"></tbody>
 </table>
+<div id="admin-panel"></div>
 <script>
 const COLUMNS = {
   alerts: {
@@ -147,6 +171,12 @@ function renderCell(value) {
 
 let currentView = 'alerts';
 
+function resetStateDivs() {
+  document.getElementById('login-required').style.display = 'none';
+  document.getElementById('not-implemented').style.display = 'none';
+  document.getElementById('forbidden').style.display = 'none';
+}
+
 async function refresh() {
   const view = COLUMNS[currentView];
   const head = document.getElementById('head');
@@ -158,30 +188,26 @@ async function refresh() {
   }
 
   const response = await fetch(view.endpoint, { credentials: 'same-origin', headers: authHeaders() });
-  const loginRequired = document.getElementById('login-required');
-  const notImplemented = document.getElementById('not-implemented');
+  resetStateDivs();
   const table = document.getElementById('table');
   const empty = document.getElementById('empty');
   const meta = document.getElementById('meta');
 
   if (response.status === 401) {
-    loginRequired.style.display = 'block';
-    notImplemented.style.display = 'none';
+    document.getElementById('login-required').style.display = 'block';
     table.hidden = true;
     empty.hidden = true;
     meta.textContent = 'Not logged in.';
     return;
   }
-  loginRequired.style.display = 'none';
 
   if (response.status === 501) {
-    notImplemented.style.display = 'block';
+    document.getElementById('not-implemented').style.display = 'block';
     table.hidden = true;
     empty.hidden = true;
     meta.textContent = `${currentView}: not implemented.`;
     return;
   }
-  notImplemented.style.display = 'none';
 
   const messages = await response.json();
   meta.textContent = `${messages.length} ${currentView} from the platform; refreshing every 3 seconds`;
@@ -195,6 +221,172 @@ async function refresh() {
     for (const value of view.row(message)) row.appendChild(renderCell(value));
     rows.appendChild(row);
   }
+}
+
+// Admin panel: identities + roles WE assign within this platform -- a
+// TrueConf identity's role here (viewer/engineer/admin/anything an admin
+// types) is entirely our own data (app/identity/models.py's identity_roles
+// table), fully ours to manage.
+//
+// The AD fields are a different thing and are labeled as such in the UI:
+// this platform does not create, modify, or otherwise administer real
+// Active Directory accounts. AD here is what platform/README.md/АР-07 call
+// a nominal attribute source -- department/team text an admin records
+// against an identity for routing purposes, stored only in our own
+// database (app/identity/models.py:AdAccountLink), never written back to
+// any real directory. Saving it here has zero effect on the actual AD DC.
+async function renderAdmin() {
+  const panel = document.getElementById('admin-panel');
+  const table = document.getElementById('table');
+  const empty = document.getElementById('empty');
+  const meta = document.getElementById('meta');
+  table.hidden = true;
+  empty.hidden = true;
+  panel.style.display = 'none';
+
+  const [identitiesResponse, rolesResponse] = await Promise.all([
+    fetch('/v1/identities', { credentials: 'same-origin', headers: authHeaders() }),
+    fetch('/v1/auth/roles', { credentials: 'same-origin', headers: authHeaders() }),
+  ]);
+  resetStateDivs();
+
+  if (identitiesResponse.status === 401 || rolesResponse.status === 401) {
+    document.getElementById('login-required').style.display = 'block';
+    meta.textContent = 'Not logged in.';
+    return;
+  }
+  if (identitiesResponse.status === 403 || rolesResponse.status === 403) {
+    document.getElementById('forbidden').style.display = 'block';
+    meta.textContent = 'Admin role required.';
+    return;
+  }
+
+  const identities = await identitiesResponse.json();
+  const roles = await rolesResponse.json();
+  meta.textContent = `${identities.length} identities. Admin panel does not auto-refresh (so it never clobbers an edit in progress) -- switch tabs and back to reload.`;
+  panel.style.display = 'block';
+  panel.innerHTML = '';
+  for (const identity of identities) panel.appendChild(renderIdentityCard(identity, roles));
+}
+
+function renderIdentityCard(identity, roles) {
+  const card = document.createElement('div');
+  card.className = 'admin-card';
+
+  const title = document.createElement('h3');
+  title.textContent = identity.display_label || '(no display name)';
+  card.appendChild(title);
+
+  const subject = document.createElement('div');
+  subject.className = 'subject';
+  subject.textContent = identity.identity_id;
+  card.appendChild(subject);
+
+  const roleBadges = document.createElement('div');
+  roleBadges.className = 'roles';
+  for (const roleId of identity.roles) {
+    const span = document.createElement('span');
+    span.className = 'badge';
+    span.style.background = '#22314a';
+    span.style.color = '#e8edf5';
+    span.textContent = roleId;
+    roleBadges.appendChild(span);
+  }
+  card.appendChild(roleBadges);
+
+  const status = document.createElement('div');
+  status.className = 'admin-status';
+
+  // Role assignment -- entirely ours: app/identity/models.py's
+  // identity_roles table, nothing to do with TrueConf or AD.
+  const roleRow = document.createElement('div');
+  roleRow.className = 'admin-row';
+  const roleLabel = document.createElement('label');
+  roleLabel.textContent = 'Grant role';
+  const roleSelect = document.createElement('select');
+  for (const role of roles) {
+    const option = document.createElement('option');
+    option.value = role.role_id;
+    option.textContent = `${role.role_id}${identity.roles.includes(role.role_id) ? ' (already has it)' : ''}`;
+    roleSelect.appendChild(option);
+  }
+  const roleButton = document.createElement('button');
+  roleButton.textContent = 'Assign';
+  roleButton.onclick = async () => {
+    status.textContent = 'Saving...';
+    status.className = 'admin-status';
+    const response = await fetch(`/v1/identities/${identity.identity_id}/roles`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role_id: roleSelect.value }),
+    });
+    if (response.ok) {
+      const updated = await response.json();
+      status.textContent = `Roles now: ${updated.roles.join(', ')}`;
+      status.className = 'admin-status ok';
+    } else {
+      status.textContent = `Failed (${response.status})`;
+      status.className = 'admin-status error';
+    }
+  };
+  roleRow.append(roleLabel, roleSelect, roleButton);
+  card.appendChild(roleRow);
+
+  // AD reference fields -- see the function's leading comment: this is
+  // our own nominal copy for routing, not real AD administration.
+  const adNote = document.createElement('div');
+  adNote.className = 'ad-note';
+  adNote.textContent = 'AD reference (ours only -- we do not create or manage real Active Directory accounts here; see platform/README.md, АР-07):';
+  card.appendChild(adNote);
+
+  const adLoginInput = fieldInput('AD login', identity.ad_login);
+  const departmentInput = fieldInput('Department', identity.department);
+  const teamInput = fieldInput('Team', identity.team);
+  card.append(adLoginInput.row, departmentInput.row, teamInput.row);
+
+  const adRow = document.createElement('div');
+  adRow.className = 'admin-row';
+  const adButton = document.createElement('button');
+  adButton.textContent = 'Save AD reference';
+  adButton.onclick = async () => {
+    status.textContent = 'Saving...';
+    status.className = 'admin-status';
+    const response = await fetch(`/v1/identities/${identity.identity_id}/ad-link`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ad_login: adLoginInput.input.value,
+        department: departmentInput.input.value,
+        team: teamInput.input.value,
+      }),
+    });
+    if (response.ok) {
+      status.textContent = 'AD reference saved.';
+      status.className = 'admin-status ok';
+    } else {
+      status.textContent = `Failed (${response.status})`;
+      status.className = 'admin-status error';
+    }
+  };
+  adRow.appendChild(adButton);
+  card.appendChild(adRow);
+
+  card.appendChild(status);
+  return card;
+}
+
+function fieldInput(labelText, value) {
+  const row = document.createElement('div');
+  row.className = 'admin-row';
+  const label = document.createElement('label');
+  label.textContent = labelText;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = value || '';
+  row.append(label, input);
+  return { row, input };
 }
 
 async function refreshSummary() {
@@ -231,20 +423,34 @@ async function updateAuthLink() {
   }
 }
 
+function showView() {
+  const isAdmin = currentView === 'admin';
+  document.getElementById('table').hidden = isAdmin || document.getElementById('table').hidden;
+  document.getElementById('admin-panel').style.display = isAdmin ? 'block' : 'none';
+  if (isAdmin) {
+    renderAdmin();
+  } else {
+    document.getElementById('admin-panel').style.display = 'none';
+    refresh();
+  }
+}
+
 for (const button of document.querySelectorAll('nav button')) {
   button.addEventListener('click', () => {
     document.querySelector('nav button.active').classList.remove('active');
     button.classList.add('active');
     currentView = button.dataset.view;
-    refresh();
+    showView();
   });
 }
 
 captureSessionTokenFromUrl();
 updateAuthLink();
-refresh();
+showView();
 refreshSummary();
-setInterval(() => { refresh(); refreshSummary(); }, 3000);
+// Admin intentionally excluded from the auto-refresh loop -- see
+// renderAdmin's comment: it must never clobber an in-progress edit.
+setInterval(() => { if (currentView !== 'admin') refresh(); refreshSummary(); }, 3000);
 </script>
 </body>
 </html>

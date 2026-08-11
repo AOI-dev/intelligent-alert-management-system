@@ -12,7 +12,7 @@ from app.identity.db import get_session
 from app.identity.dependencies import get_current_identity, require_role
 from app.identity.models import Identity
 from app.identity.oauth_client import TrueConfOAuthClient, client_from_env
-from app.identity.repository import assign_role, get_or_provision_identity, link_ad_account, list_identities
+from app.identity.repository import assign_role, get_or_provision_identity, link_ad_account, list_identities, list_roles
 from app.identity.return_to import parse_allowlist, validate_return_to
 from app.identity.session import SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS, issue_session_cookie
 
@@ -119,6 +119,20 @@ async def list_all_identities(
     _: Identity = Depends(require_role("admin")),
 ) -> list[dict]:
     return [_identity_out(identity) for identity in await list_identities(session)]
+
+
+@router.get("/roles")
+async def list_all_roles(
+    session: AsyncSession = Depends(get_session),
+    _: Identity = Depends(require_role("admin")),
+) -> list[dict]:
+    """Roles are data, not code (an admin panel role picker should never
+    hardcode role names -- see SEED_ROLES/assign_role's auto-insert in
+    app/identity/repository.py, the whole point is that adding a role is
+    an insert, not a deploy). Lives under /v1/auth, not /v1/identities,
+    since it's not identity-scoped.
+    """
+    return [{"role_id": role.id, "description": role.description} for role in await list_roles(session)]
 
 
 class RoleAssignment(BaseModel):
