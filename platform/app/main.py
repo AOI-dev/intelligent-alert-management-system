@@ -355,6 +355,20 @@ app.include_router(identity_admin_router)
 ANY_AUTHENTICATED_ROLE = require_role("viewer", "engineer", "admin")
 
 
+def oauth_is_configured() -> bool:
+    """Frontend-visible readiness check. Never expose credential values; the
+    browser only needs to know whether its login link can be actionable."""
+    return all(
+        os.environ.get(name)
+        for name in (
+            "TRUECONF_BASE_URL",
+            "TRUECONF_OAUTH_CLIENT_ID",
+            "TRUECONF_OAUTH_CLIENT_SECRET",
+            "TRUECONF_OAUTH_REDIRECT_URI",
+        )
+    )
+
+
 @app.get("/health")
 async def health() -> dict:
     return {
@@ -362,6 +376,7 @@ async def health() -> dict:
         "kafka": app.state.kafka_status,
         "identity_db": app.state.identity_status,
         "monitoring_db": app.state.monitoring_db_status,
+        "auth": "configured" if oauth_is_configured() else "not_configured",
     }
 
 

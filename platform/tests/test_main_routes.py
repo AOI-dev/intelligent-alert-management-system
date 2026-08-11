@@ -22,6 +22,33 @@ from app.identity.models import Identity
 FAKE_IDENTITY = Identity(id=uuid4(), trueconf_subject="test-subject", display_label="Test User")
 
 
+@pytest.fixture(autouse=True)
+def _health_state(monkeypatch):
+    monkeypatch.setattr(main_module.app.state, "kafka_status", "connected", raising=False)
+    monkeypatch.setattr(main_module.app.state, "identity_status", "connected", raising=False)
+    monkeypatch.setattr(main_module.app.state, "monitoring_db_status", "connected", raising=False)
+
+
+@pytest.mark.asyncio
+async def test_health_reports_when_oauth_login_is_configured(monkeypatch):
+    for name in (
+        "TRUECONF_BASE_URL",
+        "TRUECONF_OAUTH_CLIENT_ID",
+        "TRUECONF_OAUTH_CLIENT_SECRET",
+        "TRUECONF_OAUTH_REDIRECT_URI",
+    ):
+        monkeypatch.setenv(name, "configured")
+
+    assert (await main_module.health())["auth"] == "configured"
+
+
+@pytest.mark.asyncio
+async def test_health_reports_when_oauth_login_is_not_configured(monkeypatch):
+    monkeypatch.delenv("TRUECONF_OAUTH_CLIENT_SECRET", raising=False)
+
+    assert (await main_module.health())["auth"] == "not_configured"
+
+
 @pytest.mark.asyncio
 async def test_summary_reflects_the_empty_window_when_nothing_has_been_ingested():
     result = await main_module.summary(_=FAKE_IDENTITY)
