@@ -65,38 +65,31 @@ Go to **http://localhost:8091** in a browser. You should see the
 (Alerts / Events / Decisions / Incidents).
 
 Expected, not a bug:
-- The tables show **"Not logged in"** — this is the normal state for this
-  setup, and it will **stay** that way; see "Why you can't log in from
-  here" below, this isn't something to debug.
+- The tables show **"Not logged in"** until you actually log in (see
+  below) — that's correct, not an error.
 - The **Incidents** tab always shows "Not implemented yet (501)" — that's
-  intentional, not an error. That feature genuinely doesn't exist on the
-  backend yet; the frontend is supposed to say so honestly rather than
-  show a fake empty table.
+  intentional too. That feature genuinely doesn't exist on the backend
+  yet; the frontend is supposed to say so honestly rather than show a
+  fake empty table.
 
-### Why you can't log in from here (and don't need to, for most work)
+### Logging in from here does work — a quick note on why
 
-Clicking "Log in" here will not work, and it's not a bug to fix — it's a
-real limit of how OAuth2 login works, not something specific to this
-project. TrueConf's login flow always sends you back to a single,
-pre-registered address (`161.104.107.172:8100`, the deployed backend) —
-that's a security requirement of OAuth2 itself, not a choice made here.
-Your browser then has a valid login only for that address, never for
-`localhost:8091`, no matter what the frontend container proxies to
-server-side.
+TrueConf's OAuth2 login always sends your browser back to one fixed
+address (`161.104.107.172:8100`, the deployed backend) — that's a
+security requirement of OAuth2 itself, not something this project chose.
+The normal consequence would be that your login is only valid there, not
+for `localhost:8091`. Clicking "Log in" here works anyway because the
+backend hands the finished login back to whatever origin asked for it (via
+a one-time code in the URL, picked up by the page automatically) instead
+of only ever setting a cookie tied to that one fixed address — but only
+for origins it's been told to trust, and `localhost:8091` is one of them.
+If you ever see a normal cookie-only login fail from some *other* origin
+(a different port, a teammate's machine), that's why: it has to be
+explicitly allowlisted server-side (`AUTH_RETURN_TO_ALLOWLIST` in
+`platform/flags.env`) — ask for that to be added rather than assuming your
+setup is broken.
 
-What this means in practice: everything in steps 1-6 covers the vast
-majority of frontend work — layout, the tables, the "not logged in" state
-itself, the "not implemented" state, styling, adding columns. All of that
-develops fine here, live-edited, with nothing more to set up.
-
-For the *smaller* slice of work that specifically needs to see real
-logged-in data (alerts/events actually populated, testing what a signed-in
-view looks like): open **http://161.104.107.172:8091** instead (the
-already-deployed dashboard, same host as the backend, where login
-actually works) — or, if you're testing a change you made locally, publish
-it first (see "Publishing your changes" below) and check it there. Ask for
-a TrueConf test login when you get to this point; you don't need one
-before then.
+Ask for a TrueConf test login when you get to this point.
 
 If step 4 doesn't show the page at all: check `docker compose logs web`
 for errors, and confirm `curl http://161.104.107.172:8100/health` returns

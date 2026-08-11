@@ -100,8 +100,9 @@ page at `http://<host>:8100/`.
   the primary dashboard, which reverse-proxies to this API instead of
   duplicating it)
 - `GET /metrics`
-- `GET /v1/auth/login`, `GET /v1/auth/callback`, `POST /v1/auth/logout`,
-  `GET /v1/auth/me`
+- `GET /v1/auth/login` (accepts `?return_to=<origin>` for cross-origin
+  login — see "Cross-origin login" below), `GET /v1/auth/callback`,
+  `POST /v1/auth/logout`, `GET /v1/auth/me`
 - `GET /v1/identities`, `POST /v1/identities/{id}/roles`,
   `PUT /v1/identities/{id}/ad-link` — admin role only
 
@@ -209,6 +210,35 @@ accounts in the `active-directory` stack's AD DC. Once those users have
 each logged in once via `/v1/auth/login`,
 `platform/scripts/seed_synthetic_ad.py` backfills synthetic department/team
 data onto their identities — see the script's docstring.
+
+## Cross-origin login
+
+The identity model (`identities`/`identity_roles`/`ad_account_links`) is
+the actual auth authority here, not TrueConf's session mechanics — TrueConf
+only ever answers "who is this" once, at login. That distinction matters
+because TrueConf's OAuth2 `redirect_uri` is fixed to one pre-registered
+host (a real OAuth2 constraint, not a choice made here), so the
+`httponly` session cookie `/v1/auth/callback` sets is only ever valid for
+that same host. A frontend on any other origin — a developer's own
+machine, a second deployment — would never see it.
+
+`GET /v1/auth/login?return_to=<origin>` (`app/identity/return_to.py`)
+covers that case: if `origin` exactly matches one in
+`AUTH_RETURN_TO_ALLOWLIST` (`platform/flags.env`, comma-separated exact
+origins, no path), `/v1/auth/callback` redirects to
+`{origin}/#session=<token>` instead of `/` — the same signed token the
+cookie carries, delivered via URL *fragment* specifically because
+fragments are never transmitted to any server, only readable by JS already
+running on that origin. The frontend (`frontend/public/index.html`) picks
+it up once, stores it, and sends `Authorization: Bearer <token>` on
+API calls instead of relying on the cookie.
+`app/identity/dependencies.py:get_current_identity` accepts either —
+cookie first, header as the fallback — so this is purely additive; the
+plain same-host cookie flow (deployed frontend + platform on one host)
+is unchanged.
+
+An unrecognized or absent `return_to` isn't an error — it's silently
+ignored and the flow falls back to the cookie-only default it always had.
 
 ## Zabbix API token
 

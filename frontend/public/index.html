@@ -104,6 +104,34 @@ function badge(text) {
   return { __badge: String(text || '').toLowerCase() };
 }
 
+// Cross-origin login: platform's session cookie is only ever valid for
+// the host that set it (TrueConf's OAuth2 redirect_uri is fixed there --
+// see platform/app/identity/return_to.py for the full reasoning), so when
+// this page isn't on that host, /v1/auth/callback instead hands the same
+// signed token back via URL fragment. Picked up once here, stored, and
+// sent as a Bearer header from then on -- fragments are never sent to any
+// server, so this is the only place it's ever visible in transit.
+const SESSION_STORAGE_KEY = 'platform_session_token';
+
+function captureSessionTokenFromUrl() {
+  const match = /(?:^|#)session=([^&]+)/.exec(window.location.hash);
+  if (!match) return;
+  sessionStorage.setItem(SESSION_STORAGE_KEY, decodeURIComponent(match[1]));
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+}
+
+function authHeaders() {
+  const token = sessionStorage.getItem(SESSION_STORAGE_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function loginUrl() {
+  // Only meaningful cross-origin (see above); harmless same-origin, where
+  // the server ignores return_to unless it's allowlisted and just falls
+  // back to the cookie it always set.
+  return `/v1/auth/login?return_to=${encodeURIComponent(window.location.origin)}`;
+}
+
 function renderCell(value) {
   const cell = document.createElement('td');
   if (value && typeof value === 'object' && '__badge' in value) {
@@ -129,7 +157,7 @@ async function refresh() {
     head.appendChild(th);
   }
 
-  const response = await fetch(view.endpoint, { credentials: 'same-origin' });
+  const response = await fetch(view.endpoint, { credentials: 'same-origin', headers: authHeaders() });
   const loginRequired = document.getElementById('login-required');
   const notImplemented = document.getElementById('not-implemented');
   const table = document.getElementById('table');
@@ -170,7 +198,7 @@ async function refresh() {
 }
 
 async function refreshSummary() {
-  const response = await fetch('/v1/summary', { credentials: 'same-origin' });
+  const response = await fetch('/v1/summary', { credentials: 'same-origin', headers: authHeaders() });
   const summary = document.getElementById('summary');
   if (!response.ok) { summary.textContent = ''; return; }
 
@@ -188,14 +216,16 @@ async function refreshSummary() {
 
 async function updateAuthLink() {
   const link = document.getElementById('auth-link');
-  const response = await fetch('/v1/auth/me', { credentials: 'same-origin' });
+  link.href = loginUrl();
+  const response = await fetch('/v1/auth/me', { credentials: 'same-origin', headers: authHeaders() });
   if (response.ok) {
     const identity = await response.json();
     link.textContent = `Log out (${identity.display_label || identity.trueconf_subject || 'signed in'})`;
     link.href = '#';
     link.onclick = async (event) => {
       event.preventDefault();
-      await fetch('/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      await fetch('/v1/auth/logout', { method: 'POST', credentials: 'same-origin', headers: authHeaders() });
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
       window.location.reload();
     };
   }
@@ -210,6 +240,7 @@ for (const button of document.querySelectorAll('nav button')) {
   });
 }
 
+captureSessionTokenFromUrl();
 updateAuthLink();
 refresh();
 refreshSummary();
