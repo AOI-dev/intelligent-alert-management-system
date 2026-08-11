@@ -26,8 +26,9 @@ from app.identity.router import admin_router as identity_admin_router
 from app.identity.router import router as identity_router
 from app.integration.kafka_consumer import KafkaTopicConsumer
 from app.integration.kafka_producer import KafkaProducer
-from app.integration.normalizers import normalize_zabbix_problem
+from app.integration.normalizers import normalize_zabbix_problem, to_event_data
 from app.integration.zabbix import ZabbixApiClient
+from app.monitoring.query import filter_messages, find_by_field, summarize
 from app.monitoring.store import MessageStore
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ async def handle_alert(message: MessageEnvelope) -> None:
     consumed_total.labels(topic=ALERTS_TOPIC, outcome="accepted").inc()
 
     alert = MonitoringAlert.model_validate(message.data)
-    for decision in plugin_engine.process(alert):
+    for decision in await plugin_engine.process(alert):
         await publish_decision(decision, message.correlation_id)
     # Legacy pipeline kept available until plugin engine is fully validated.
     for decision in correlation_engine.process(alert):
@@ -109,6 +110,9 @@ async def publish_decision(decision: Decision, correlation_id: UUID) -> None:
 
 
 async def publish_alert(producer: KafkaProducer, message_id: UUID, correlation_id: UUID, data: dict, source: str) -> None:
+    """`data` should already carry `source_event_id` -- see publish_event's
+    docstring for why message_id doubles as that link.
+    """
     await producer.publish(
         ALERTS_TOPIC,
         MessageEnvelope(
@@ -117,10 +121,37 @@ async def publish_alert(producer: KafkaProducer, message_id: UUID, correlation_i
             occurred_at=datetime.now(timezone.utc),
             producer=source,
             correlation_id=correlation_id,
-            data=data,
+            data={**data, "source_event_id": str(message_id)},
         ),
     )
     produced_total.labels(topic=ALERTS_TOPIC, source=source).inc()
+
+
+async def publish_event(producer: KafkaProducer, message_id: UUID, correlation_id: UUID, alert_data: dict, source: str) -> None:
+    """Publish the raw event corresponding to an already-normalized alert
+    (see to_event_data) -- every alert from a real vendor gets a matching
+    event on EVENTS_TOPIC, not just synthetic ones from eventsim.
+
+    Reuses `message_id` -- already a stable hash of the vendor's own
+    occurrence identity (see normalize_*'s stable_id calls) -- as both this
+    Kafka message's id and the event's own `event_id`, so publish_alert can
+    set the same value as the alert's `source_event_id` without any lookup:
+    both sides derive it from the same source data, independently.
+    """
+    event_data = to_event_data(alert_data)
+    event_data.setdefault("event_id", str(message_id))
+    await producer.publish(
+        EVENTS_TOPIC,
+        MessageEnvelope(
+            message_id=message_id,
+            message_type="monitoring.event",
+            occurred_at=datetime.now(timezone.utc),
+            producer=source,
+            correlation_id=correlation_id,
+            data=event_data,
+        ),
+    )
+    produced_total.labels(topic=EVENTS_TOPIC, source=source).inc()
 
 
 async def reconcile_zabbix(producer: KafkaProducer) -> None:
@@ -130,6 +161,7 @@ async def reconcile_zabbix(producer: KafkaProducer) -> None:
     try:
         for problem in await client.open_problems():
             message_id, correlation_id, data = normalize_zabbix_problem(problem)
+            await publish_event(producer, message_id, correlation_id, data, "zabbix-api")
             await publish_alert(producer, message_id, correlation_id, data, "zabbix-api")
         zabbix_reconcile_total.labels(outcome="success").inc()
     except Exception:
@@ -234,7 +266,7 @@ async def contours() -> dict:
         },
         "filtering": "pass-through policy",
         "alerts": "Kafka alert projection active",
-        "core": "rolling-window pipeline wired to live alerts; transforms are pass-through, no dedup/correlation policy chosen yet",
+        "core": "rolling-window pipeline wired to live alerts; FlapAwareCorrelator dedups/correlates/suppresses (app/core/correlation_automaton.py)",
         "plugins": [m.name for m in plugin_registry.all_metadata],
         "monitoring": "bounded in-memory read model; TimescaleDB deferred",
         "routing": "port reserved; no delivery adapter",
@@ -244,18 +276,67 @@ async def contours() -> dict:
 
 
 @app.get("/v1/events")
-async def list_events(_: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> list[dict]:
-    return events.list()
+async def list_events(
+    source: str | None = None,
+    status: str | None = None,
+    since: datetime | None = None,
+    _: Identity = Depends(ANY_AUTHENTICATED_ROLE),
+) -> list[dict]:
+    return filter_messages(events.list(), since, source=source, status=status)
 
 
 @app.get("/v1/alerts")
-async def list_alerts(_: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> list[dict]:
-    return alerts.list()
+async def list_alerts(
+    severity: str | None = None,
+    source: str | None = None,
+    since: datetime | None = None,
+    _: Identity = Depends(ANY_AUTHENTICATED_ROLE),
+) -> list[dict]:
+    return filter_messages(alerts.list(), since, severity=severity, source=source)
+
+
+@app.get("/v1/alerts/{alert_id}")
+async def get_alert(alert_id: UUID, _: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> dict:
+    found = find_by_field(alerts.list(), "alert_id", str(alert_id))
+    if found is None:
+        raise HTTPException(status_code=404, detail="alert not found in the retained window")
+    return found
+
+
+@app.get("/v1/summary")
+async def summary(_: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> dict:
+    return summarize(len(events.list()), alerts.list(), decisions.list(), HISTORY_LIMIT)
 
 
 @app.get("/v1/decisions")
-async def list_decisions(_: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> list[dict]:
-    return decisions.list()
+async def list_decisions(
+    decision_type: str | None = None,
+    _: Identity = Depends(ANY_AUTHENTICATED_ROLE),
+) -> list[dict]:
+    return filter_messages(decisions.list(), None, decision_type=decision_type)
+
+
+INCIDENTS_NOT_IMPLEMENTED = (
+    "incidents are not implemented yet -- monitoring.incident-events.v1 is a defined "
+    "contract that nothing publishes to; see README's Incidents section. This is a "
+    "stub returning 501 on purpose, not an empty result set standing in for 'no "
+    "incidents' -- those are different things and conflating them would be a lie."
+)
+
+
+@app.get("/v1/incidents")
+async def list_incidents(_: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> list[dict]:
+    raise HTTPException(status_code=501, detail=INCIDENTS_NOT_IMPLEMENTED)
+
+
+@app.get("/v1/incidents/{incident_id}")
+async def get_incident(incident_id: UUID, _: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> dict:
+    raise HTTPException(status_code=501, detail=INCIDENTS_NOT_IMPLEMENTED)
+
+
+@app.post("/v1/incidents/{incident_id}/ack")
+async def acknowledge_incident(incident_id: UUID, _: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> dict:
+    raise HTTPException(status_code=501, detail=INCIDENTS_NOT_IMPLEMENTED)
 
 
 async def _require_producer() -> KafkaProducer:
@@ -284,6 +365,7 @@ async def integration_webhook(slug: str, request: Request) -> dict:
         webhooks_total.labels(source=slug, outcome="invalid").inc()
         raise HTTPException(status_code=422, detail=str(error)) from error
     for item in parsed:
+        await publish_event(producer, item.message_id, item.correlation_id, item.data, slug)
         await publish_alert(producer, item.message_id, item.correlation_id, item.data, slug)
     webhooks_total.labels(source=slug, outcome="accepted").inc()
     return {"accepted": len(parsed)}

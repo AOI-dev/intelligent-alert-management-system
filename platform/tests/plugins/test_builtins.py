@@ -46,7 +46,8 @@ async def test_kafka_source_example_is_inert():
     assert alerts == []
 
 
-def test_plugin_engine_with_empty_registry_is_pass_through():
+@pytest.mark.asyncio
+async def test_plugin_engine_with_empty_registry_is_pass_through():
     engine = PluginEngine(PluginRegistry.empty())
-    decisions = engine.process(alert())
+    decisions = await engine.process(alert())
     assert decisions == []

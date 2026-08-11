@@ -45,8 +45,17 @@ def test_default_key_groups_by_source_and_metric():
     assert default_key(_alert(source="zabbix", metric="disk")) != default_key(_alert(source="zabbix", metric="cpu"))
 
 
-def test_engine_defaults_are_pass_through_and_produce_no_decisions():
+def test_engine_default_correlator_opens_an_incident_on_the_first_alert():
     engine = CorrelationEngine()
+
+    decisions = engine.process(_alert())
+
+    assert len(decisions) == 1
+    assert decisions[0].decision_type == "route"
+
+
+def test_engine_with_pass_through_transform_produces_no_decisions():
+    engine = CorrelationEngine(sequence_transforms=[PassThroughSequenceTransform()])
 
     decisions = engine.process(_alert())
 

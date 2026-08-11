@@ -1,0 +1,17 @@
+name: frontend
+
+services:
+  web:
+    build: .
+    container_name: monitoring-frontend
+    restart: unless-stopped
+    environment:
+      PLATFORM_UPSTREAM: ${PLATFORM_UPSTREAM:-monitoring-platform:8100}
+    ports:
+      - "${FRONTEND_PORT:-8090}:80"
+    networks: [platform]
+
+networks:
+  platform:
+    name: platform_platform
+    external: true

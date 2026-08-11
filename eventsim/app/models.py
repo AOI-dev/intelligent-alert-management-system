@@ -10,6 +10,11 @@ class EventIn(BaseModel):
     source: str
     metric: str
     value: float
+    # platform's MonitoringEvent (app/contracts/messages.py) requires
+    # status as of the Zabbix/Prometheus event-ingestion increment;
+    # eventsim only ever simulates an active reading, so this is a fixed
+    # default rather than something callers need to pass.
+    status: str = "firing"
     labels: dict[str, str] = {}
 
 

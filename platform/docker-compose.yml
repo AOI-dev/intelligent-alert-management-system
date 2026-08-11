@@ -29,9 +29,11 @@ services:
       TRUECONF_USERINFO_PATH: ${TRUECONF_USERINFO_PATH:-/api/v4/users/self}
       TRUECONF_USERINFO_SUBJECT_FIELD: ${TRUECONF_USERINFO_SUBJECT_FIELD:-id}
       TRUECONF_USERINFO_DISPLAY_FIELD: ${TRUECONF_USERINFO_DISPLAY_FIELD:-displayName}
+      VLLM_BASE_URL: ${VLLM_BASE_URL:-}
+      VLLM_API_KEY: ${VLLM_API_KEY:-}
     ports:
       - "${PLATFORM_PORT:-8100}:8100"
-    networks: [eventsim, prometheus, zabbix, timescaledb]
+    networks: [eventsim, prometheus, zabbix, timescaledb, platform]
 
 networks:
   eventsim:
@@ -46,3 +48,8 @@ networks:
   timescaledb:
     name: timescaledb_timescaledb
     external: true
+  # This stack's own network -- so other stacks (frontend/) can reach
+  # monitoring-platform by container name, same convention as the four
+  # external networks above but owned here instead of joined from here.
+  platform:
+    name: platform_platform

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitoring Platform</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#10141d; color:#e8edf5; font:15px system-ui,sans-serif; margin:2rem; }
+  h1 { margin:0; font-size:1.4rem; display:inline-block; }
+  header { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+  p { color:#9aa8bb; }
+  a.auth { color:#8bd5ff; text-decoration:none; font-size:.85rem; }
+  a.auth:hover { text-decoration:underline; }
+  nav { display:flex; gap:.5rem; margin:1.25rem 0 0; }
+  nav button { background:#1a2130; color:#9aa8bb; border:1px solid #2a3444; border-radius:.4rem; padding:.4rem .9rem; font-size:.85rem; cursor:pointer; }
+  nav button.active { background:#22314a; color:#e8edf5; border-color:#3a4d6e; }
+  table { width:100%; border-collapse:collapse; margin-top:1rem; }
+  th,td { text-align:left; padding:.55rem; border-bottom:1px solid #2a3444; }
+  th { color:#9aa8bb; font-size:.78rem; text-transform:uppercase; }
+  .badge { border-radius:1rem; padding:.16rem .5rem; font-size:.78rem; font-weight:700; }
+  .critical,.high { color:#ffb4b4; background:#7f1d1d; }
+  .warning,.average { color:#ffe4a3; background:#713f12; }
+  .info,.resolved { color:#a9e6b8; background:#14532d; }
+  code { color:#8bd5ff; }
+  #empty { color:#9aa8bb; margin-top:2rem; }
+  #login-required, #not-implemented { color:#9aa8bb; margin-top:2rem; display:none; }
+  #login-required a { color:#8bd5ff; }
+  #summary { display:flex; gap:.6rem; margin-top:.75rem; flex-wrap:wrap; }
+  #summary .chip { background:#1a2130; border:1px solid #2a3444; border-radius:.4rem; padding:.3rem .7rem; font-size:.8rem; color:#9aa8bb; }
+  #summary .chip b { color:#e8edf5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Monitoring platform</h1>
+  <a class="auth" id="auth-link" href="/v1/auth/login">Log in</a>
+</header>
+<p id="meta">Loading...</p>
+<div id="summary"></div>
+<nav>
+  <button data-view="alerts" class="active">Alerts</button>
+  <button data-view="events">Events</button>
+  <button data-view="decisions">Decisions</button>
+  <button data-view="incidents">Incidents</button>
+</nav>
+<div id="login-required">Session expired or not logged in yet. <a href="/v1/auth/login">Log in</a> to see live data.</div>
+<div id="not-implemented">Not implemented yet on the server (501) — not "nothing to show", genuinely not built. See the platform README's "Incidents" section.</div>
+<div id="empty">No data yet.</div>
+<table id="table" hidden>
+<thead><tr id="head"></tr></thead>
+<tbody id="rows"></tbody>
+</table>
+<script>
+const COLUMNS = {
+  alerts: {
+    endpoint: '/v1/alerts',
+    headers: ['Time', 'Severity', 'Rule', 'Source', 'Metric', 'Value', 'Correlation'],
+    row: (message) => {
+      const alert = message.data;
+      return [
+        new Date(message.occurred_at).toLocaleString(),
+        badge(alert.severity),
+        alert.rule, alert.source, alert.metric,
+        `${alert.value} / ${alert.threshold}`,
+        (message.correlation_id || '').slice(0, 8),
+      ];
+    },
+  },
+  events: {
+    endpoint: '/v1/events',
+    headers: ['Time', 'Status', 'Source', 'Metric', 'Value', 'Correlation'],
+    row: (message) => {
+      const event = message.data;
+      return [
+        new Date(message.occurred_at).toLocaleString(),
+        badge(event.status),
+        event.source, event.metric ?? '', event.value ?? '',
+        (message.correlation_id || '').slice(0, 8),
+      ];
+    },
+  },
+  decisions: {
+    endpoint: '/v1/decisions',
+    headers: ['Type', 'Action', 'Reason', 'Alert', 'Policy'],
+    row: (message) => {
+      const decision = message.data ?? message; // /v1/decisions returns Decision directly, not an envelope
+      return [
+        badge(decision.decision_type),
+        decision.action, decision.reason,
+        (decision.alert_id || '').slice(0, 8),
+        decision.policy_id ?? '',
+      ];
+    },
+  },
+  incidents: {
+    endpoint: '/v1/incidents',
+    headers: ['Status', 'Severity', 'Service', 'Alerts', 'Opened'],
+    row: () => [], // never reached today -- /v1/incidents always 501s, see below
+  },
+};
+
+function badge(text) {
+  return { __badge: String(text || '').toLowerCase() };
+}
+
+function renderCell(value) {
+  const cell = document.createElement('td');
+  if (value && typeof value === 'object' && '__badge' in value) {
+    const span = document.createElement('span');
+    span.className = `badge ${value.__badge}`;
+    span.textContent = value.__badge;
+    cell.appendChild(span);
+  } else {
+    cell.textContent = value;
+  }
+  return cell;
+}
+
+let currentView = 'alerts';
+
+async function refresh() {
+  const view = COLUMNS[currentView];
+  const head = document.getElementById('head');
+  head.textContent = '';
+  for (const label of view.headers) {
+    const th = document.createElement('th');
+    th.textContent = label;
+    head.appendChild(th);
+  }
+
+  const response = await fetch(view.endpoint, { credentials: 'same-origin' });
+  const loginRequired = document.getElementById('login-required');
+  const notImplemented = document.getElementById('not-implemented');
+  const table = document.getElementById('table');
+  const empty = document.getElementById('empty');
+  const meta = document.getElementById('meta');
+
+  if (response.status === 401) {
+    loginRequired.style.display = 'block';
+    notImplemented.style.display = 'none';
+    table.hidden = true;
+    empty.hidden = true;
+    meta.textContent = 'Not logged in.';
+    return;
+  }
+  loginRequired.style.display = 'none';
+
+  if (response.status === 501) {
+    notImplemented.style.display = 'block';
+    table.hidden = true;
+    empty.hidden = true;
+    meta.textContent = `${currentView}: not implemented.`;
+    return;
+  }
+  notImplemented.style.display = 'none';
+
+  const messages = await response.json();
+  meta.textContent = `${messages.length} ${currentView} from the platform; refreshing every 3 seconds`;
+  empty.hidden = messages.length > 0;
+  table.hidden = messages.length === 0;
+
+  const rows = document.getElementById('rows');
+  rows.textContent = '';
+  for (const message of messages) {
+    const row = document.createElement('tr');
+    for (const value of view.row(message)) row.appendChild(renderCell(value));
+    rows.appendChild(row);
+  }
+}
+
+async function refreshSummary() {
+  const response = await fetch('/v1/summary', { credentials: 'same-origin' });
+  const summary = document.getElementById('summary');
+  if (!response.ok) { summary.textContent = ''; return; }
+
+  const data = await response.json();
+  const chips = [
+    `<span class="chip"><b>${data.events_in_window}</b> events</span>`,
+    `<span class="chip"><b>${data.alerts_in_window}</b> alerts</span>`,
+  ];
+  for (const [severity, count] of Object.entries(data.alerts_by_severity)) {
+    chips.push(`<span class="chip badge ${severity}">${count} ${severity}</span>`);
+  }
+  chips.push(`<span class="chip">window: last ${data.window_limit}</span>`);
+  summary.innerHTML = chips.join('');
+}
+
+async function updateAuthLink() {
+  const link = document.getElementById('auth-link');
+  const response = await fetch('/v1/auth/me', { credentials: 'same-origin' });
+  if (response.ok) {
+    const identity = await response.json();
+    link.textContent = `Log out (${identity.display_label || identity.trueconf_subject || 'signed in'})`;
+    link.href = '#';
+    link.onclick = async (event) => {
+      event.preventDefault();
+      await fetch('/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      window.location.reload();
+    };
+  }
+}
+
+for (const button of document.querySelectorAll('nav button')) {
+  button.addEventListener('click', () => {
+    document.querySelector('nav button.active').classList.remove('active');
+    button.classList.add('active');
+    currentView = button.dataset.view;
+    refresh();
+  });
+}
+
+updateAuthLink();
+refresh();
+refreshSummary();
+setInterval(() => { refresh(); refreshSummary(); }, 3000);
+</script>
+</body>
+</html>

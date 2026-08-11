@@ -1,0 +1,10 @@
+name: trueconf-bot
+
+services:
+  bot:
+    build: .
+    container_name: trueconf-bot
+    restart: unless-stopped
+    environment:
+      TRUECONF_SERVER: ${TRUECONF_SERVER}
+      TRUECONF_BOT_TOKEN: ${TRUECONF_BOT_TOKEN}

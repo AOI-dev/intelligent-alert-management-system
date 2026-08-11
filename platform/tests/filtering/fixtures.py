@@ -9,11 +9,13 @@ def monitoring_event(
     source: str = "zabbix",
     metric: str = "cpu",
     value: float = 95.0,
+    status: str = "firing",
     labels: dict | None = None,
 ) -> MonitoringEvent:
     return MonitoringEvent(
         event_id=uuid4(),
         source=source,
+        status=status,
         metric=metric,
         value=value,
         labels=labels or {},

@@ -45,8 +45,17 @@ docker compose exec samba-ad-dc ldapsearch -x -H ldap://localhost \
 
 ## Seeding synthetic accounts
 
-Nothing seeds automatically. To create test users/OUs matching the same
-synthetic org chart the platform's `seed_synthetic_ad.py` uses:
+Nothing seeds automatically. `scripts/create_synthetic_users.sh [count]`
+creates `count` (default 8) test accounts cycling through the same
+synthetic org chart `platform/scripts/seed_synthetic_ad.py` uses, adds each
+to `Domain Users`, and writes generated passwords to a gitignored
+`synthetic-users.env`:
+
+```sh
+./scripts/create_synthetic_users.sh
+```
+
+To do it by hand instead (e.g. one specific account):
 
 ```sh
 docker compose exec samba-ad-dc samba-tool user create ad-synthetic-000 CHANGEME123 \

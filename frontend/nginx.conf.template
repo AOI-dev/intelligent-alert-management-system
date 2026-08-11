@@ -1,0 +1,41 @@
+server {
+    listen 80;
+
+    # Docker's embedded DNS (127.0.0.11, always available on a user-defined
+    # bridge network -- see this stack joining platform_platform). Combined
+    # with `set $upstream` below, this makes proxy_pass resolve
+    # PLATFORM_UPSTREAM per-request instead of once at nginx startup --
+    # without it, nginx refuses to start at all if monitoring-platform
+    # isn't resolvable yet (or crashes on its next reload if it's
+    # temporarily down), instead of just failing the individual request.
+    resolver 127.0.0.11 valid=10s;
+
+    location / {
+        root   /usr/share/nginx/html;
+        index  index.html;
+        try_files $uri /index.html;
+    }
+
+    # Reverse-proxied, not CORS'd: the browser only ever talks to this one
+    # origin, so the platform session cookie (scoped to whatever host the
+    # browser thinks it's on) just works -- no CORS middleware or
+    # SameSite/credentials tweaking needed on the platform side.
+    location /v1/ {
+        set $upstream ${PLATFORM_UPSTREAM};
+        proxy_pass http://$upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cookie_path / /;
+    }
+
+    location = /health {
+        set $upstream ${PLATFORM_UPSTREAM};
+        proxy_pass http://$upstream/health;
+    }
+
+    location = /metrics {
+        set $upstream ${PLATFORM_UPSTREAM};
+        proxy_pass http://$upstream/metrics;
+    }
+}

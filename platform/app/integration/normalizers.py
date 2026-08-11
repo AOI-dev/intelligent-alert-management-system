@@ -15,6 +15,32 @@ def parse_epoch(value: str | int | float | None) -> datetime:
         return datetime.now(timezone.utc)
 
 
+def to_event_data(alert_data: dict) -> dict:
+    """Every normalize_* alert dict below doubles as its corresponding raw
+    event: MonitoringEvent's open schema (extra="allow", see
+    app/contracts/messages.py) means everything already computed here --
+    severity, rule, summary, labels, whatever a given vendor added -- just
+    rides along unchanged. The alert-specific `state`/`starts_at`/
+    `occurred_at` keys get renamed to the event's own `status`/`timestamp`.
+
+    Defensively renames a stray `event_id` key to `vendor_event_id` if a
+    normalizer ever uses that name for a vendor's own id (see
+    normalize_zabbix_problem's `vendor_event_id`, chosen precisely to avoid
+    this): it must not collide with MonitoringEvent's own `event_id` (its
+    record identity, a UUID) or with MonitoringAlert's `source_event_id`
+    (the link *to* that record, a different UUID) -- three distinct
+    things that happen to be easy to name the same by accident.
+    """
+    event_data = dict(alert_data)
+    event_data["status"] = event_data.pop("state", "unknown")
+    timestamp = event_data.pop("occurred_at", None) or event_data.pop("starts_at", None)
+    if timestamp:
+        event_data["timestamp"] = timestamp
+    if "event_id" in event_data:
+        event_data["vendor_event_id"] = event_data.pop("event_id")
+    return event_data
+
+
 def normalize_alertmanager(alert: dict) -> tuple[UUID, UUID, dict]:
     labels = {str(k): str(v) for k, v in alert.get("labels", {}).items()}
     annotations = {str(k): str(v) for k, v in alert.get("annotations", {}).items()}
@@ -62,7 +88,7 @@ def normalize_zabbix_problem(problem: dict) -> tuple[UUID, UUID, dict]:
         "value": 1.0,
         "threshold": 1.0,
         "state": "firing",
-        "event_id": event_id,
+        "vendor_event_id": event_id,
         "summary": problem.get("name", "Zabbix problem"),
         "description": problem.get("opdata", ""),
         "occurred_at": parse_epoch(problem.get("clock")).isoformat(),

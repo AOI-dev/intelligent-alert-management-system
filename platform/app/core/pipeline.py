@@ -1,12 +1,15 @@
 """Orchestrates the alert core's two transformation stages (АР-03): a
-per-alert stage, then a per-sequence stage over a rolling window. Defaults
-are pass-through, same as EventFilter in app/filtering/service.py -- this
-lays down the pipeline shape, not the dedup/correlation policy that will
-eventually fill it in.
+per-alert stage, then a per-sequence stage over a rolling window. The
+per-alert stage defaults to identity (classification/enrichment plugs in
+there, same shape as EventFilter in app/filtering/service.py); the
+per-sequence stage defaults to FlapAwareCorrelator
+(app/core/correlation_automaton.py), the dedup/correlation/storm-suppression
+policy the happy-path scenarios in tests/core/ specify.
 """
 from collections.abc import Callable, Sequence
 
 from app.contracts.messages import Decision, MonitoringAlert
+from app.core.correlation_automaton import FlapAwareCorrelator
 from app.core.ports import AlertTransform, SequenceTransform, SequenceWindow
 from app.core.window import TimeBoundedWindow
 
@@ -21,19 +24,29 @@ class IdentityAlertTransform:
 
 
 class PassThroughSequenceTransform:
-    """Extension point: dedup/correlation/storm-suppression slots in here.
-    Produces no decisions until a real policy is implemented.
+    """Opt-out extension point: produces no decisions regardless of window
+    contents. Available for callers that want to disable correlation
+    entirely; CorrelationEngine itself defaults to FlapAwareCorrelator.
     """
 
-    def apply(self, _key: str, _window: Sequence[MonitoringAlert]) -> list[Decision]:
+    def apply(self, key: str, window: Sequence[MonitoringAlert]) -> list[Decision]:
         return []
 
 
 def default_key(alert: MonitoringAlert) -> str:
-    """Placeholder grouping key -- (source, metric). Revisit once the
-    correlation design (asset/service/CMDB-owner, correlation id, ...) is
-    settled; nothing downstream assumes this specific choice.
+    """Grouping key, in priority order: an explicit correlation_id label
+    (the adapter/upstream vendor already knows these alerts are one
+    incident), else the service label (alerts about the same service are
+    presumed related), else (source, metric). Revisit once the broader
+    correlation design (asset/CMDB-owner, ...) is settled; nothing
+    downstream assumes this specific choice.
     """
+    correlation_id = alert.labels.get("correlation_id")
+    if correlation_id:
+        return correlation_id
+    service = alert.labels.get("service")
+    if service:
+        return service
     return f"{alert.source}:{alert.metric}"
 
 
@@ -48,7 +61,7 @@ class CorrelationEngine:
         self._window = window if window is not None else TimeBoundedWindow(DEFAULT_WINDOW_SECONDS)
         self._alert_transforms = alert_transforms if alert_transforms is not None else [IdentityAlertTransform()]
         self._sequence_transforms = (
-            sequence_transforms if sequence_transforms is not None else [PassThroughSequenceTransform()]
+            sequence_transforms if sequence_transforms is not None else [FlapAwareCorrelator()]
         )
         self._key_fn = key_fn
 

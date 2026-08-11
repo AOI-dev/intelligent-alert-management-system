@@ -1,7 +1,17 @@
 """Happy-path tests for the AI enrichment contour.
 
-The AI module currently only defines ports. These tests parse a mock LLM
-response and assert the contract a real enrichment service must satisfy.
+The AI module currently only defines ports (app/ai/ports.py:
+EnrichmentPublisher, EnrichmentResultHandler) -- no worker calls a real LLM
+anywhere yet, vLLM env vars notwithstanding (see platform/flags.env; no
+client code reads them). test_mock_response_satisfies_oracle is xfail on
+purpose: _to_result below is a parser this test file invents for itself,
+not anything in app/ai/, so without the xfail it would pass by
+construction regardless of whether real enrichment exists -- a mock
+tested against itself, same trap tests/core/test_core.py's oracle tests
+were in before FlapAwareCorrelator actually existed to satisfy them. Once
+a real service parses a real LLM response through real app/ai/ code, wire
+this test to call that instead of _to_result and drop the xfail -- same
+transition test_core.py already went through.
 """
 import pytest
 
@@ -10,7 +20,7 @@ from tests.ai.oracle import ORACLE
 
 
 def _to_result(alert_id, capability: str, response: dict) -> dict:
-    """Minimal parser mirroring what a real enrichment service would do."""
+    """Stand-in only -- not app/ai/ code. See module docstring."""
     return {
         "alert_id": str(alert_id),
         "capability": capability,
@@ -22,6 +32,11 @@ def _to_result(alert_id, capability: str, response: dict) -> dict:
     }
 
 
+@pytest.mark.xfail(
+    reason="no real enrichment service exists yet -- this only proves a test-local mock parser "
+    "satisfies the oracle, not any app/ai/ code; see module docstring",
+    strict=True,
+)
 @pytest.mark.parametrize("capability", ["classification", "priority", "root_cause"])
 def test_mock_response_satisfies_oracle(capability: str):
     request = enrichment_request()

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA_VERSION = "1.0"
 EVENTS_TOPIC = "monitoring.events.v1"
@@ -16,10 +16,24 @@ NOTIFICATION_RESULTS_TOPIC = "monitoring.notification-results.v1"
 
 
 class MonitoringEvent(BaseModel):
+    """Minimal common shape for anything ingested from a monitoring
+    source — a raw Zabbix/Prometheus occurrence, or whatever a future
+    vendor sends. Required fields are deliberately small: `source` and
+    `status`. Everything else, known (metric/value) or not (whatever a
+    normalizer or an LLM enrichment step invents), is optional or
+    free-form — `extra="allow"` means new fields attach with no schema
+    change here, so this stays open for exactly as much as a normalizer or
+    an LLM wants to put in it.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
     event_id: UUID = Field(default_factory=uuid4)
     source: str
-    metric: str
-    value: float
+    status: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    metric: str | None = None
+    value: float | None = None
     labels: dict[str, str] = Field(default_factory=dict)
 
 
@@ -41,6 +55,13 @@ class MonitoringAlert(BaseModel):
     value: float
     threshold: float
     labels: dict[str, str] = Field(default_factory=dict)
+    # The MonitoringEvent this alert was derived from, i.e. MonitoringEvent
+    # .event_id when both were normalized from the same source occurrence
+    # (see to_event_data/publish_event in app/main.py). Records are never
+    # mutated -- a correction is a new event/alert, not an edit of this one
+    # -- so this link never goes stale; it's an explicit, queryable version
+    # of what's already implicit in the two sharing a correlation_id.
+    source_event_id: UUID | None = None
 
 
 class IncidentEvent(BaseModel):

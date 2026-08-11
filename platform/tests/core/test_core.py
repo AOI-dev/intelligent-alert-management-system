@@ -1,13 +1,13 @@
 """Happy-path tests for the core correlation/detection contour.
 
 These tests run synthetic alert sequences through the CorrelationEngine and
-verify the decision distribution against an oracle. The default engine is
-pass-through, so the scenario tests are marked xfail while they document the
-contract a real implementation must satisfy.
+verify the decision distribution against an oracle. The default engine runs
+FlapAwareCorrelator (app/core/correlation_automaton.py), which is built to
+satisfy exactly this oracle -- see that module for the state machine.
 """
 import pytest
 
-from app.core.pipeline import CorrelationEngine
+from app.core.pipeline import CorrelationEngine, PassThroughSequenceTransform
 from tests.core.fixtures import (
     correlated_cascade,
     duplicate_storm,
@@ -30,7 +30,6 @@ def _run_scenario(alerts: list) -> dict[str, int]:
     return counts
 
 
-@pytest.mark.xfail(reason="CorrelationEngine is pass-through; transforms pending", strict=True)
 @pytest.mark.parametrize(
     "name, make_alerts, oracle",
     [
@@ -48,7 +47,9 @@ def test_scenario_matches_oracle(name: str, make_alerts, oracle: CoreOracle):
     assert counts["suppress"] == oracle.suppress_count, f"{name}: suppress count mismatch"
 
 
-def test_default_engine_emits_no_decisions():
-    """Baseline: until a real transform is injected, no decisions are produced."""
-    counts = _run_scenario(duplicate_storm(5))
-    assert counts == {"route": 0, "dedup": 0, "suppress": 0}
+def test_pass_through_transform_is_still_available_as_an_explicit_opt_out():
+    engine = CorrelationEngine(sequence_transforms=[PassThroughSequenceTransform()])
+    decisions = []
+    for alert in duplicate_storm(5):
+        decisions.extend(engine.process(alert))
+    assert decisions == []

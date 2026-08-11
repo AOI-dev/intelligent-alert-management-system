@@ -21,7 +21,12 @@ AUTOGENERATE_INTERVAL = float(os.environ.get("EVENTSIM_AUTOGENERATE_INTERVAL", "
 events_total = Counter("eventsim_events_total", "Synthetic events ingested")
 alerts_total = Counter("eventsim_alerts_total", "Alerts fired, by rule", ["rule", "severity"])
 
-producer = MonitoringProducer(KAFKA_BOOTSTRAP_SERVERS)
+# Constructed in lifespan(), not here: aiokafka's AIOKafkaProducer requires a
+# running event loop as of aiokafka 0.11, so building it at import time
+# breaks any plain `import app.main` (a test, a REPL, `python -c`) with no
+# loop running yet -- matches how platform/app/main.py and
+# notifications/app/main.py already do this.
+producer: MonitoringProducer | None = None
 
 
 async def _autogenerate_loop() -> None:
@@ -32,6 +37,8 @@ async def _autogenerate_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    global producer
+    producer = MonitoringProducer(KAFKA_BOOTSTRAP_SERVERS)
     await producer.start()
     autogen_task = asyncio.create_task(_autogenerate_loop()) if AUTOGENERATE else None
     try:

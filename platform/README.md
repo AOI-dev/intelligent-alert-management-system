@@ -7,9 +7,23 @@ page at `http://<host>:8100/`.
 ## Implemented contours
 
 - **Integration**: consumes `monitoring.events.v1` and `monitoring.alerts.v1`.
-  Eventsim is the first producer. Alertmanager posts alert lifecycle transitions
-  to the platform webhook; Zabbix can post action webhooks and is reconciled
-  through its JSON-RPC API when the dedicated token is configured.
+  Eventsim is the synthetic producer. Alertmanager posts alert lifecycle
+  transitions to the platform webhook; Zabbix can post action webhooks and is
+  reconciled through its JSON-RPC API when the dedicated token is configured.
+  Every real (non-eventsim) alert also gets a corresponding event published to
+  `monitoring.events.v1` — see `to_event_data` in
+  `app/integration/normalizers.py` and `MonitoringEvent`'s schema below —
+  eventsim was, until this increment, the only real producer of that topic.
+- **Event schema**: `MonitoringEvent` (`app/contracts/messages.py`) is
+  deliberately minimal-but-open — only `source` and `status` are required
+  (`timestamp` defaults to now if a normalizer doesn't have a better one);
+  everything else, known (`metric`/`value`/`labels`) or not, is optional or
+  free-form via Pydantic's `extra="allow"`. A normalizer attaches whatever
+  fields its vendor has (see `to_event_data`); an LLM enrichment step can
+  attach whatever it derives, later, the same way — no schema change either
+  time. `MonitoringAlert` stays its own, stricter type (the deterministic
+  core's `FlapAwareCorrelator` genuinely needs `rule`/`severity`/`metric`/
+  `threshold` to be present, not optional).
 - **Filtering**: pass-through service boundary for later noise/storm policy.
 - **Alerts**: alert projection and query API.
 - **Monitoring**: bounded in-memory event/alert history. TimescaleDB replaces
@@ -20,13 +34,20 @@ page at `http://<host>:8100/`.
   `notifications/README.md`), not by code in this monolith.
 - **AI**: reserved Kafka request/result topics for horizontally scalable worker
   groups; no model or worker is required for the deterministic path.
-- **Core**: `app/core/` runs every consumed alert through a per-alert stage,
-  then a per-sequence stage over a `TimeBoundedWindow` keyed by
-  `(source, metric)` (see `app/core/pipeline.py`). This is real plumbing
-  wired to the live Kafka flow, but both stages default to pass-through —
-  no dedup/correlation/storm-suppression policy or windowing algorithm has
-  been chosen yet; that's deliberately left open (АР-03). Any `Decision`
-  the transforms do produce is published to `monitoring.decisions.v1` and
+- **Core**: `app/core/` runs every consumed alert through a per-alert stage
+  (identity by default), then a per-sequence stage over a `TimeBoundedWindow`
+  keyed by correlation_id label, then service label, then `(source, metric)`
+  (see `default_key` in `app/core/pipeline.py`). The per-sequence stage
+  defaults to `FlapAwareCorrelator` — a small state machine per key (NEW →
+  OPEN → FLAPPING) implementing АР-03's dedup/correlation/storm-suppression
+  policy: the first alert for a key opens an incident (`route`); escalations
+  and additional correlated signals fold in silently; an exact repeat dedups;
+  and a signal recurring at a lower severity than before marks the key
+  flapping, suppressing everything after. See
+  `app/core/correlation_automaton.py` for the full state machine and
+  `tests/core/oracle.py` for the scenarios it's built to satisfy.
+  `PassThroughSequenceTransform` remains available as an explicit opt-out.
+  Any `Decision` produced is published to `monitoring.decisions.v1` and
   queryable at `/v1/decisions`.
 - **Incidents**: `monitoring.incident-events.v1` is a defined contract (see
   `artifacts/kafka-protocol.md`); nothing publishes to it yet, so treat it
@@ -43,19 +64,49 @@ page at `http://<host>:8100/`.
 
 - `GET /health`
 - `GET /v1/contours`
-- `GET /v1/events`
-- `GET /v1/alerts`
+- `GET /v1/events` — query params: `source`, `status`, `since` (ISO 8601)
+- `GET /v1/alerts` — query params: `severity`, `source`, `since`
+- `GET /v1/alerts/{alert_id}` — 404 if the alert isn't in the retained
+  window (see "Frontend query endpoints" below)
+- `GET /v1/decisions` — output of `app/core/`; query param: `decision_type`
+- `GET /v1/summary` — counts (alerts by severity, decisions by type) over
+  the current retained window; the `frontend/` dashboard's header widget
+- `GET /v1/incidents`, `GET /v1/incidents/{id}`,
+  `POST /v1/incidents/{id}/ack` — **stubs**: always `501`, on purpose (see
+  below), since incidents aren't implemented
 - `POST /v1/integrations/{slug}/webhook` — generic dispatch to whichever
   `WebhookAlertSource` claims `slug`; built in today as `alertmanager` and
   `zabbix` (see "Monitoring client adapters" below)
-- `GET /` — polling alert landing page
+- `GET /` — the monolith's own bundled landing page (see `frontend/` for
+  the primary dashboard, which reverse-proxies to this API instead of
+  duplicating it)
 - `GET /metrics`
 - `GET /v1/auth/login`, `GET /v1/auth/callback`, `POST /v1/auth/logout`,
   `GET /v1/auth/me`
 - `GET /v1/identities`, `POST /v1/identities/{id}/roles`,
   `PUT /v1/identities/{id}/ad-link` — admin role only
-- `GET /v1/decisions` — output of `app/core/`, empty until a real transform
-  is implemented
+
+## Frontend query endpoints
+
+`/v1/events`, `/v1/alerts`, `/v1/decisions`, and the new `/v1/alerts/{id}`
+and `/v1/summary` all read from the same bounded in-memory
+`MessageStore` (`app/monitoring/store.py`, `PLATFORM_HISTORY_LIMIT` items,
+default 500) they always have — none of this is a new data source, just
+query/filter/lookup logic (`app/monitoring/query.py`, unit-tested
+independent of FastAPI/auth/Kafka) added on top of what was already a
+plain unfiltered `.list()`. This is deliberately the *live-tail* cache,
+not a general-purpose history API — see the design discussion this
+increment came out of: a bounded, in-process cache is right for "what's
+happening now" (which is what a polling dashboard needs), wrong for
+time-range/audit queries once volume or retention needs exceed the
+window, which is what the still-pending TimescaleDB projection is for
+instead of stretching this cache to cover both jobs.
+
+`/v1/incidents*` are real endpoints that always return `501`, not stubs
+that fake success with an empty list — an empty list would look
+identical to "no incidents right now," which isn't true; the honest
+answer is "this isn't implemented yet." See `INCIDENTS_NOT_IMPLEMENTED`
+in `app/main.py`.
 
 ## Monitoring client adapters
 
@@ -130,9 +181,15 @@ since each has a different failure mode.
 
 First login for any TrueConf account auto-provisions an identity with the
 `viewer` role (JIT provisioning); an existing admin promotes it via
-`POST /v1/identities/{id}/roles`. `platform/scripts/seed_synthetic_ad.py`
-backfills synthetic department/team data for identities that have logged in
-at least once — see the script's docstring.
+`POST /v1/identities/{id}/roles`. To get a batch of test accounts without
+logging in by hand, `scripts/create_trueconf_users.py` provisions real
+TrueConf Server accounts for a synthetic org chart (see the script's
+docstring for the required `TRUECONF_ADMIN_API_TOKEN`); the matching
+`active-directory/scripts/create_synthetic_users.sh` creates the same
+accounts in the `active-directory` stack's AD DC. Once those users have
+each logged in once via `/v1/auth/login`,
+`platform/scripts/seed_synthetic_ad.py` backfills synthetic department/team
+data onto their identities — see the script's docstring.
 
 ## Zabbix API token
 
