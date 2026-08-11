@@ -36,12 +36,12 @@ set -a; . flags.env; set +a
 docker compose up -d --build
 ```
 
-Open `http://<host>:8090`.
+Open `http://<host>:8091`.
 
 ## Deploy
 
 ```sh
-scripts/deploy.sh frontend frontend http://localhost:8090/health
+scripts/deploy.sh frontend frontend http://localhost:8091/health
 ```
 
 ## Configuration
