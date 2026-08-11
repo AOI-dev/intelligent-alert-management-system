@@ -16,9 +16,22 @@ services:
       ZABBIX_API_URL: ${ZABBIX_API_URL:-http://zabbix-web:8080/api_jsonrpc.php}
       ZABBIX_API_TOKEN: ${ZABBIX_API_TOKEN:-}
       ZABBIX_RECONCILE_INTERVAL: ${ZABBIX_RECONCILE_INTERVAL:-60}
+      RATE_LIMIT_WEBHOOK_CAPACITY: ${RATE_LIMIT_WEBHOOK_CAPACITY:-60}
+      RATE_LIMIT_WEBHOOK_REFILL_PER_SECOND: ${RATE_LIMIT_WEBHOOK_REFILL_PER_SECOND:-5}
+      RATE_LIMIT_API_CAPACITY: ${RATE_LIMIT_API_CAPACITY:-120}
+      RATE_LIMIT_API_REFILL_PER_SECOND: ${RATE_LIMIT_API_REFILL_PER_SECOND:-20}
+      IDENTITY_DATABASE_URL: ${IDENTITY_DATABASE_URL}
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY:-}
+      TRUECONF_BASE_URL: ${TRUECONF_BASE_URL:-}
+      TRUECONF_OAUTH_CLIENT_ID: ${TRUECONF_OAUTH_CLIENT_ID:-}
+      TRUECONF_OAUTH_CLIENT_SECRET: ${TRUECONF_OAUTH_CLIENT_SECRET:-}
+      TRUECONF_OAUTH_REDIRECT_URI: ${TRUECONF_OAUTH_REDIRECT_URI:-}
+      TRUECONF_USERINFO_PATH: ${TRUECONF_USERINFO_PATH:-/api/v4/users/self}
+      TRUECONF_USERINFO_SUBJECT_FIELD: ${TRUECONF_USERINFO_SUBJECT_FIELD:-id}
+      TRUECONF_USERINFO_DISPLAY_FIELD: ${TRUECONF_USERINFO_DISPLAY_FIELD:-displayName}
     ports:
       - "${PLATFORM_PORT:-8100}:8100"
-    networks: [eventsim, prometheus, zabbix]
+    networks: [eventsim, prometheus, zabbix, timescaledb]
 
 networks:
   eventsim:
@@ -29,4 +42,7 @@ networks:
     external: true
   zabbix:
     name: zabbix_zabbix
+    external: true
+  timescaledb:
+    name: timescaledb_timescaledb
     external: true

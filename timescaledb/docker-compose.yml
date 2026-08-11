@@ -1,0 +1,27 @@
+name: timescaledb
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:${TIMESCALEDB_VERSION:-latest-pg16}
+    container_name: timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-platform}
+      POSTGRES_USER: ${POSTGRES_USER:-platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-platform} -d ${POSTGRES_DB:-platform}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [timescaledb]
+
+networks:
+  timescaledb:
+    name: timescaledb_timescaledb
+
+volumes:
+  timescaledb-data:

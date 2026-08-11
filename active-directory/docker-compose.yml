@@ -1,0 +1,33 @@
+name: active-directory
+
+services:
+  samba-ad-dc:
+    image: nowsci/samba-domain:${SAMBA_DOMAIN_VERSION:-latest}
+    container_name: samba-ad-dc
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${AD_DOMAIN:-PILOT.INTERNAL}
+      DOMAINPASS: ${AD_ADMIN_PASSWORD}
+      HOSTIP: ${AD_HOST_IP:-10.90.0.10}
+      NOCOMPLEXITY: "true"
+      INSECURELDAP: "true"
+    hostname: samba-ad-dc
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - samba-data:/var/lib/samba
+      - samba-config:/etc/samba/external
+    networks:
+      active-directory:
+        ipv4_address: ${AD_HOST_IP:-10.90.0.10}
+
+networks:
+  active-directory:
+    name: active-directory_active-directory
+    ipam:
+      config:
+        - subnet: 10.90.0.0/24
+
+volumes:
+  samba-data:
+  samba-config:

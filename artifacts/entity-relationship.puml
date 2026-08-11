@@ -1,0 +1,170 @@
+@startuml entity-relationship
+skinparam backgroundColor #FFFFFF
+skinparam linetype ortho
+skinparam roundcorner 8
+skinparam defaultFontSize 13
+skinparam EntityFontSize 14
+skinparam EntityBackgroundColor #F8FAFC
+skinparam EntityBorderColor #334155
+skinparam ArrowColor #475569
+
+title ER-диаграмма: сущности платформы управления мониторингом
+
+entity "identity" as ID {
+  * id : UUID <<PK>>
+  --
+  * trueconf_subject : varchar(255) <<unique>>
+  * display_label : varchar(255)
+  * created_at : timestamptz
+  * last_login_at : timestamptz
+}
+
+entity "role" as ROL {
+  * id : varchar(64) <<PK>>
+  --
+  description : varchar(255)
+}
+
+entity "identity_role" as IR {
+  * identity_id : UUID <<PK, FK>>
+  * role_id : varchar(64) <<PK, FK>>
+  --
+  * assigned_at : timestamptz
+}
+
+entity "ad_account_link" as ADL {
+  * identity_id : UUID <<PK, FK>>
+  --
+  * ad_login : varchar(255) <<unique>>
+  * department : varchar(255)
+  * team : varchar(255)
+  manager_ad_login : varchar(255)
+  * synthetic : boolean
+}
+
+entity "team" as TEAM {
+  * id : UUID <<PK>>
+  --
+  * name : varchar(255) <<unique>>
+  description : text
+  * created_at : timestamptz
+}
+
+entity "identity_team" as IT {
+  * identity_id : UUID <<PK, FK>>
+  * team_id : UUID <<PK, FK>>
+  --
+  role_in_team : varchar(64)
+  * joined_at : timestamptz
+}
+
+entity "service" as SVC {
+  * id : UUID <<PK>>
+  --
+  * name : varchar(255) <<unique>>
+  * criticality : varchar(8)
+  description : text
+  owning_team_id : UUID <<FK>>
+  * created_at : timestamptz
+}
+
+entity "asset" as ASSET {
+  * id : UUID <<PK>>
+  --
+  * hostname : varchar(255)
+  asset_type : varchar(64)
+  environment : varchar(64)
+  ip_address : inet
+  * created_at : timestamptz
+}
+
+entity "asset_service" as ASVC {
+  * asset_id : UUID <<PK, FK>>
+  * service_id : UUID <<PK, FK>>
+}
+
+entity "incident" as INC {
+  * id : UUID <<PK>>
+  --
+  * status : varchar(16)
+  * severity : varchar(16)
+  service_id : UUID <<FK>>
+  assigned_team_id : UUID <<FK>>
+  assigned_identity_id : UUID <<FK>>
+  * opened_at : timestamptz
+  acked_at : timestamptz
+  resolved_at : timestamptz
+  summary : text
+}
+
+entity "alert" as ALERT {
+  * id : UUID <<PK>>
+  --
+  * rule : varchar(255)
+  * severity : varchar(16)
+  * source : varchar(255)
+  * metric : varchar(255)
+  * value : float
+  * threshold : float
+  labels : jsonb
+  incident_id : UUID <<FK>>
+  * occurred_at : timestamptz
+}
+
+entity "decision" as DEC {
+  * id : UUID <<PK>>
+  --
+  * decision_type : varchar(16)
+  * alert_id : UUID <<FK>>
+  incident_id : UUID <<FK>>
+  * action : varchar(255)
+  reason : text
+  policy_id : varchar(255)
+  * occurred_at : timestamptz
+}
+
+entity "subscription" as SUB {
+  * id : UUID <<PK>>
+  --
+  * target_type : varchar(16)
+  * target_id : UUID
+  * channel : varchar(64)
+  filter_severity : varchar(16)
+  filter_service_id : UUID <<FK>>
+  * active : boolean
+  * created_at : timestamptz
+}
+
+entity "tag" as TAG {
+  * id : UUID <<PK>>
+  --
+  * tag_key : varchar(128)
+  tag_value : varchar(255)
+  * entity_type : varchar(32)
+  * entity_id : UUID
+}
+
+' Relations
+ID ||--|{ IR
+ROL ||--|{ IR
+ID ||--o| ADL
+
+ID }|--|{ IT
+TEAM ||--|{ IT
+
+TEAM ||--o{ SVC : owns
+TEAM ||--o{ INC : assigned to
+ID ||--o{ INC : assigned to
+
+ASSET }|--|{ ASVC
+SVC ||--|{ ASVC
+
+SVC ||--o{ INC
+INC ||--o{ ALERT
+ALERT ||--o{ DEC
+
+ID }|--o{ SUB
+TEAM }|--o{ SUB
+SVC ||--o{ SUB : filter
+
+@enduml

@@ -13,7 +13,9 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.contracts.messages import Decision, MessageEnvelope, MonitoringAlert, MonitoringEvent
 from app.core.pipeline import CorrelationEngine
+from app.core.rate_limit import RateLimitMiddleware, RateLimitRule
 from app.filtering.service import EventFilter
+from app.plugins.builtins.webhooks import AlertmanagerWebhookSource, ZabbixWebhookSource
 from app.plugins.engine import PluginEngine
 from app.plugins.registry import PluginRegistry
 from app.identity.db import SessionLocal, init_models
@@ -24,7 +26,7 @@ from app.identity.router import admin_router as identity_admin_router
 from app.identity.router import router as identity_router
 from app.integration.kafka_consumer import KafkaTopicConsumer
 from app.integration.kafka_producer import KafkaProducer
-from app.integration.normalizers import normalize_alertmanager, normalize_zabbix_problem
+from app.integration.normalizers import normalize_zabbix_problem
 from app.integration.zabbix import ZabbixApiClient
 from app.monitoring.store import MessageStore
 
@@ -38,9 +40,15 @@ HISTORY_LIMIT = int(os.environ.get("PLATFORM_HISTORY_LIMIT", "500"))
 ZABBIX_API_URL = os.environ.get("ZABBIX_API_URL", "")
 ZABBIX_API_TOKEN = os.environ.get("ZABBIX_API_TOKEN", "")
 ZABBIX_RECONCILE_INTERVAL = int(os.environ.get("ZABBIX_RECONCILE_INTERVAL", "60"))
+RATE_LIMIT_WEBHOOK_CAPACITY = float(os.environ.get("RATE_LIMIT_WEBHOOK_CAPACITY", "60"))
+RATE_LIMIT_WEBHOOK_REFILL_PER_SECOND = float(os.environ.get("RATE_LIMIT_WEBHOOK_REFILL_PER_SECOND", "5"))
+RATE_LIMIT_API_CAPACITY = float(os.environ.get("RATE_LIMIT_API_CAPACITY", "120"))
+RATE_LIMIT_API_REFILL_PER_SECOND = float(os.environ.get("RATE_LIMIT_API_REFILL_PER_SECOND", "20"))
 
 filter_service = EventFilter()
-plugin_registry = PluginRegistry.from_env(dict(os.environ))
+plugin_registry = PluginRegistry.from_env(
+    dict(os.environ), extra=[AlertmanagerWebhookSource(), ZabbixWebhookSource()]
+)
 plugin_engine = PluginEngine(plugin_registry)
 correlation_engine = CorrelationEngine()
 events = MessageStore(HISTORY_LIMIT)
@@ -184,6 +192,25 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="monitoring-platform", lifespan=lifespan)
+app.add_middleware(
+    RateLimitMiddleware,
+    rules=[
+        # Webhooks are unauthenticated, machine-to-machine, and bursty by
+        # nature (a storm at the monitored system means a storm here too) —
+        # narrower prefix, stricter budget. /health and /metrics match no
+        # rule and stay unlimited.
+        RateLimitRule(
+            prefix="/v1/integrations",
+            capacity=RATE_LIMIT_WEBHOOK_CAPACITY,
+            refill_per_second=RATE_LIMIT_WEBHOOK_REFILL_PER_SECOND,
+        ),
+        RateLimitRule(
+            prefix="/v1",
+            capacity=RATE_LIMIT_API_CAPACITY,
+            refill_per_second=RATE_LIMIT_API_REFILL_PER_SECOND,
+        ),
+    ],
+)
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 app.include_router(identity_router)
 app.include_router(identity_admin_router)
@@ -238,33 +265,28 @@ async def _require_producer() -> KafkaProducer:
     return producer
 
 
-@app.post("/v1/integrations/alertmanager/webhook", status_code=202)
-async def alertmanager_webhook(request: Request) -> dict:
+@app.post("/v1/integrations/{slug}/webhook", status_code=202)
+async def integration_webhook(slug: str, request: Request) -> dict:
+    """Dispatch a vendor webhook to whichever WebhookAlertSource claims `slug`.
+
+    Adding a monitoring client with a different payload shape means writing
+    a new adapter (see app/plugins/ports.py:WebhookAlertSource) and pointing
+    PLUGIN_PATHS at it — this route does not change.
+    """
+    source = plugin_registry.webhook_source(slug)
+    if source is None:
+        raise HTTPException(status_code=404, detail=f"No webhook adapter registered for '{slug}'")
     producer = await _require_producer()
     payload = await request.json()
-    alert_items = payload.get("alerts")
-    if not isinstance(alert_items, list):
-        webhooks_total.labels(source="alertmanager", outcome="invalid").inc()
-        raise HTTPException(status_code=422, detail="Alertmanager payload must contain alerts[]")
-    for alert in alert_items:
-        message_id, correlation_id, data = normalize_alertmanager(alert)
-        await publish_alert(producer, message_id, correlation_id, data, "alertmanager")
-    webhooks_total.labels(source="alertmanager", outcome="accepted").inc()
-    return {"accepted": len(alert_items)}
-
-
-@app.post("/v1/integrations/zabbix/webhook", status_code=202)
-async def zabbix_webhook(request: Request) -> dict:
-    """Accept the explicit Zabbix action-webhook payload documented in README."""
-    producer = await _require_producer()
-    payload = await request.json()
-    if not isinstance(payload.get("eventid"), (str, int)):
-        webhooks_total.labels(source="zabbix", outcome="invalid").inc()
-        raise HTTPException(status_code=422, detail="Zabbix payload must contain eventid")
-    message_id, correlation_id, data = normalize_zabbix_problem(payload)
-    await publish_alert(producer, message_id, correlation_id, data, "zabbix-webhook")
-    webhooks_total.labels(source="zabbix", outcome="accepted").inc()
-    return {"accepted": 1}
+    try:
+        parsed = source.parse(payload)
+    except ValueError as error:
+        webhooks_total.labels(source=slug, outcome="invalid").inc()
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    for item in parsed:
+        await publish_alert(producer, item.message_id, item.correlation_id, item.data, slug)
+    webhooks_total.labels(source=slug, outcome="accepted").inc()
+    return {"accepted": len(parsed)}
 
 
 @app.get("/")

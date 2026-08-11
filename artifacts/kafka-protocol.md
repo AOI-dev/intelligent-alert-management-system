@@ -13,6 +13,25 @@ delivery; consumers must be idempotent by `message_id`.
 | `monitoring.alerts.v1` | eventsim; Alertmanager webhook; Zabbix webhook/API reconciliation | `platform-ingestion-v1-alerts` | Fired/resolved alert lifecycle records. |
 | `monitoring.ai.enrichment.v1` | platform alert core | parallel AI worker group | Optional enrichment jobs. |
 | `monitoring.ai.results.v1` | AI workers | platform AI result contour | Enrichment results; they never block the deterministic path. |
+| `monitoring.incident-events.v1` | platform alert core (dedup logic, not yet implemented) | `platform-incidents-v1`, and any external consumer group (ticketing, analytics, AI enrichment, stress-test verifiers) | Durable incident lifecycle facts: `incident.created` / `incident.updated` / `incident.resolved`. |
+| `monitoring.decisions.v1` | platform alert core (`app/core/pipeline.py`; pipeline wired to live alerts, dedup/routing policy not yet chosen — see `platform/README.md`) | `platform-decisions-v1`, and any external consumer group | Audit trail of every dedup/routing/suppression decision: `decision.dedup` / `decision.route` / `decision.suppress`. |
+| `monitoring.notification-requests.v1` | platform routing module (not yet implemented) | `notification-dispatcher-v1` (see `notifications/`) | `notification.requested` — a resolved delivery: `target_id`, already-resolved `webhook_url`, `priority`, `reason`, `payload`. |
+| `monitoring.notification-results.v1` | `notifications` dispatcher | `platform-notification-results-v1`, and any external consumer group | Delivery outcome: `notification.delivered` / `notification.failed`. |
+
+## External consumers
+
+Any system that wants the incident/decision stream (ticketing, analytics, an
+AI worker, a stress-test verifier) reads `monitoring.incident-events.v1` /
+`monitoring.decisions.v1` directly under its own consumer group — it does not
+register with the platform at runtime. It needs only: the Kafka bootstrap
+address, a unique consumer-group name, read ACL on the topic, this contract,
+and an offset/replay policy. A consumer being down never affects another
+consumer; Kafka retains the backlog until it catches up.
+
+Notification delivery (a target that the platform should route to and track
+delivery for, as opposed to a passive reader of the stream) is a separate,
+declarative registration concept — not yet implemented; tracked as a later
+increment.
 
 ## Envelope
 

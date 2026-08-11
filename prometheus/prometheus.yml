@@ -24,3 +24,7 @@ scrape_configs:
   - job_name: platform
     static_configs:
       - targets: ["monitoring-platform:8100"]
+
+  - job_name: notifications
+    static_configs:
+      - targets: ["notifications-server:8110"]

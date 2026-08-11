@@ -30,7 +30,7 @@ title Интеллектуальная система управления мо�
 actor "Дежурный инженер\nNOC / SRE" as engineer
 cloud "Источники мониторинга\nZabbix | Prometheus | NMS\nоблака и региональные площадки" as sources
 component "Симулятор событий\nтестовые события и алерты\nбез доступа к инфраструктуре" as simulator
-cloud "Корпоративный мессенджер\nOAuth 2 и уведомления" as messenger
+cloud "Корпоративный мессенджер TrueConf\nOAuth 2 IdP (Authorization Code)\nи уведомления" as messenger
 
 package "Инфраструктурный контур доступа и интеграции" #DCECF7 {
   node "Периметр" #FFFFFF {
@@ -48,16 +48,17 @@ queue "Kafka\nшина событий и команд\nбуферизация п
 
 package "Инфраструктурный контур управления алертами" #E2F0D9 {
   node "Центральное приложение (FastAPI)" #FFFFFF {
-    component "API и доступ\nсессии, роли, OAuth 2" as api
-    component "Ядро алертов\nвалидация, правила,\nдедупликация, корреляция" as core
+    component "API и доступ\nсессии, открытая таблица ролей,\nOAuth 2 через TrueConf" as api
+    component "Ядро алертов\nвалидация, правила, скользящее окно\nдедупликация, корреляция" as core
     component "Оркестрация\nмаршрутизация, эскалации\nдоставка уведомлений" as routing
     component "Центральный мониторинг\nсостояние, поиск, аудит\nотчеты и политики" as monitoring
   }
 }
 
 package "Инфраструктурный контур данных и эксплуатации" #FCE4D6 {
-  database "TimescaleDB (PostgreSQL)\nhypertables: события, алерты, доставка\nсостояние инцидентов, политики, аудит\nretention и сжатие" as timescaledb
+  database "TimescaleDB (PostgreSQL)\nhypertables: события, алерты, доставка\nсостояние инцидентов, политики, аудит\nидентичности, роли, синтетическая\nпривязка AD (номинальный источник)\nretention и сжатие" as timescaledb
   database "CMDB / справочники\nсервисы, объекты, владельцы,\nзоны ответственности" as cmdb
+  database "Active Directory\nSamba4 AD DC, синтетические данные\nпилотный стенд, ПОКА НЕ ПОДКЛЮЧЁН" as addc #DDDDDD
   component "Redis cache\nгорячий контекст\nи защита CMDB" as cache
   queue "DLQ\nошибочные события\nи повторная обработка" as dlq
   node "Наблюдаемость" #FFFFFF {
@@ -82,6 +83,7 @@ adapters -down-> filter : нормализованные
 filter -down-> kafka : monitoring.events.v1
 kafka -down-> core : monitoring.alerts.v1
 core ..> kafka : AI enrichment jobs/results v1
+core ..> kafka : monitoring.decisions.v1
 core -down-> routing : решение по правилам
 routing -right-> messenger : уведомления
 messenger -up-> engineer : алерты / эскалации
@@ -93,10 +95,13 @@ frontend -right-> api : API
 api -down-> monitoring : доступ к панели
 monitoring -down-> timescaledb : поиск / история / состояние
 api -right-> core : команды и политики
+api ..> messenger : OAuth 2 authorize/token
+api -down-> timescaledb : identities / roles / AD-link
 
 ' Контекст и хранение вынесены в короткие боковые связи.
 core -right-> cache : обогащение
 cache -right-> cmdb : контекст
+timescaledb .[#999999].> addc : (будущий LDAP-lookup,\nсейчас синтетический seed-скрипт)
 core -down-> timescaledb : события / аудит / состояние
 routing -down-> timescaledb : политики / доставка / история
 kafka -right-> dlq : ошибки
@@ -115,11 +120,32 @@ core --> observability
 routing --> observability
 aiworker --> observability
 
+note left of core
+  <b>Ядро: заложен каркас, не алгоритм</b>
+  Конвейер per-alert -> скользящее окно
+  по ключу -> per-sequence уже работает
+  на живом потоке alerts. Сами правила
+  дедупликации/корреляции и параметры
+  окна (размер, ключ, tumbling/sliding)
+  — это pass-through заглушки, предмет
+  отдельного решения.
+end note
+
 note right of core
   <b>Гарантированный режим</b>
   Если AI или LLM недоступны,
   правила, маршрутизация и доставка
   уведомлений продолжают работать.
+end note
+
+note left of api
+  <b>Роли: открытая модель</b>
+  viewer / engineer / admin — начальные
+  строки таблицы ролей, не enum в коде.
+  Новая роль — вставка записи, а не релиз.
+  Учётная запись выдаётся синтетическим
+  TrueConf-логином на пилоте; AD — только
+  номинальный источник department/team.
 end note
 
 note right of aiworker

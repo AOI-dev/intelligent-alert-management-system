@@ -1,0 +1,25 @@
+name: notifications
+
+services:
+  server:
+    build: .
+    container_name: notifications-server
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-eventsim-kafka:9092}
+      KAFKA_NOTIFICATION_REQUESTS_TOPIC: ${KAFKA_NOTIFICATION_REQUESTS_TOPIC:-monitoring.notification-requests.v1}
+      KAFKA_NOTIFICATION_RESULTS_TOPIC: ${KAFKA_NOTIFICATION_RESULTS_TOPIC:-monitoring.notification-results.v1}
+      KAFKA_CONSUMER_GROUP: ${KAFKA_CONSUMER_GROUP:-notification-dispatcher-v1}
+      NOTIFICATIONS_HISTORY_LIMIT: ${NOTIFICATIONS_HISTORY_LIMIT:-500}
+      WEBHOOK_TIMEOUT_SECONDS: ${WEBHOOK_TIMEOUT_SECONDS:-10}
+    ports:
+      - "${NOTIFICATIONS_PORT:-8110}:8110"
+    networks: [eventsim, prometheus]
+
+networks:
+  eventsim:
+    name: eventsim_eventsim
+    external: true
+  prometheus:
+    name: prometheus_prometheus
+    external: true

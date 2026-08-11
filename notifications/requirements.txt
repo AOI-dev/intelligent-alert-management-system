@@ -5,6 +5,3 @@ prometheus-fastapi-instrumentator==7.*
 prometheus-client==0.21.*
 pydantic==2.*
 httpx==0.27.*
-sqlalchemy==2.*
-asyncpg==0.29.*
-itsdangerous==2.*

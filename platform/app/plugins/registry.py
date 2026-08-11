@@ -20,6 +20,7 @@ from app.plugins.ports import (
     DecisionExecutor,
     MetricExporter,
     PluginMetadata,
+    WebhookAlertSource,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class PluginBucket:
     """Typed collections of loaded plugins, grouped by capability."""
 
     sources: list[AlertSource] = field(default_factory=list)
+    webhook_sources: list[WebhookAlertSource] = field(default_factory=list)
     enrichers: list[AlertEnricher] = field(default_factory=list)
     correlators: list[Correlator] = field(default_factory=list)
     executors: list[DecisionExecutor] = field(default_factory=list)
@@ -47,12 +49,18 @@ class PluginRegistry:
 
     def __init__(self, plugins: Sequence[Any]) -> None:
         self._bucket = PluginBucket()
+        self._webhook_by_slug: dict[str, WebhookAlertSource] = {}
         for plugin in plugins:
             self._register(plugin)
 
     @classmethod
-    def from_env(cls, env: dict[str, str] | None = None) -> "PluginRegistry":
+    def from_env(cls, env: dict[str, str] | None = None, extra: Sequence[Any] = ()) -> "PluginRegistry":
         """Load plugin paths from PLUGIN_PATHS (comma-separated dotted paths).
+
+        `extra` seeds always-on builtins (e.g. the Alertmanager/Zabbix webhook
+        adapters) ahead of anything PLUGIN_PATHS adds, so a misconfigured env
+        var that reuses a builtin's webhook slug fails loudly at startup
+        instead of silently shadowing it.
 
         Example:
             PLUGIN_PATHS=app.plugins.builtins.dedup,app.plugins.custom.ml_correlator
@@ -60,7 +68,7 @@ class PluginRegistry:
         env = env or {}
         paths_str = env.get("PLUGIN_PATHS", "")
         paths = [p.strip() for p in paths_str.split(",") if p.strip()]
-        plugins: list[Any] = []
+        plugins: list[Any] = list(extra)
         for path in paths:
             try:
                 plugins.append(cls._load(path))
@@ -90,6 +98,16 @@ class PluginRegistry:
         if isinstance(plugin, AlertSource):
             self._bucket.sources.append(plugin)
             registered = True
+        if isinstance(plugin, WebhookAlertSource):
+            claimant = self._webhook_by_slug.get(plugin.slug)
+            if claimant is not None:
+                raise ValueError(
+                    f"Webhook slug '{plugin.slug}' is already claimed by "
+                    f"{claimant.metadata.name}; {meta.name} cannot reuse it"
+                )
+            self._bucket.webhook_sources.append(plugin)
+            self._webhook_by_slug[plugin.slug] = plugin
+            registered = True
         if isinstance(plugin, AlertEnricher):
             self._bucket.enrichers.append(plugin)
             registered = True
@@ -111,6 +129,13 @@ class PluginRegistry:
     @property
     def sources(self) -> Sequence[AlertSource]:
         return self._bucket.sources
+
+    @property
+    def webhook_sources(self) -> Sequence[WebhookAlertSource]:
+        return self._bucket.webhook_sources
+
+    def webhook_source(self, slug: str) -> WebhookAlertSource | None:
+        return self._webhook_by_slug.get(slug)
 
     @property
     def enrichers(self) -> Sequence[AlertEnricher]:
