@@ -23,8 +23,11 @@ ORACLE: dict[str, CoreOracle] = {
     "duplicate_storm": CoreOracle(route_count=1, dedup_count=9, max_incidents=1),
     # First alert opens an incident; the rest are correlated updates.
     "correlated_cascade": CoreOracle(route_count=1, max_incidents=1),
-    # Severity escalation should update the existing incident, not create a new one.
-    "severity_escalation": CoreOracle(route_count=1, max_incidents=1),
+    # Severity escalation stays one incident, but each rise into high/critical
+    # pages again (warning opens, then high, then critical): an on-call engineer
+    # told about a warning has not been told the service is now critical, and
+    # folding that in silently is what lost catalog_degraded@900 on the corpus.
+    "severity_escalation": CoreOracle(route_count=3, max_incidents=1),
     # Flapping should be suppressed after the first actionable alert.
     "flapping_alerts": CoreOracle(route_count=1, suppress_count=3, max_incidents=1),
     # Unrelated services should each get their own incident.

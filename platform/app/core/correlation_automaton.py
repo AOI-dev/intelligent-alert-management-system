@@ -5,10 +5,26 @@ scenario by scenario, and step by step. This module is that same policy
 made explicit and executable: a small state machine per correlation key.
 
     NEW ---first alert---> OPEN
-    OPEN ---new correlated signal, or an escalation of a known one---> OPEN   (silent)
+    OPEN ---severity rises to high/critical, above the key's peak---> OPEN   (route)
+    OPEN ---new correlated signal, or a lesser escalation---> OPEN           (silent)
     OPEN ---identical repeat of a known signal---> OPEN                      (dedup)
     OPEN ---a known signal recurs at a LOWER severity than before---> FLAPPING (suppress)
-    FLAPPING ---anything, while the key stays unstable---> FLAPPING          (suppress)
+    FLAPPING ---severity rises to high/critical, above the key's peak---> OPEN (route)
+    FLAPPING ---anything else, while the key stays unstable---> FLAPPING     (suppress)
+
+The route-on-escalation edge is what keeps the policy safe rather than
+merely quiet. Without it, an open key absorbs *everything* that lands on
+it, including the first critical of a second, unrelated incident that
+happens to share a service with the first — measured on scenario/corpus.json,
+that lost catalog_degraded@900 entirely, because the `catalog` key was
+already open on warning-level cascade from db_saturation@120. Noise
+reduction that loses an incident is not a trade worth making (ФТ7.1,
+ФТ7.2: critical/high are never hidden or auto-suppressed), so a severity
+peak that the key has not seen before always pages, even out of FLAPPING.
+
+It stays quiet by construction: the edge fires on a *rise above the peak
+so far*, so each severity level pages at most once per window, and a key
+already running at critical does not page again for staying there.
 
 "Signal identity" (rule, metric, source) is what makes this more than a
 single OPEN/CLOSED flag: two different signals sharing a correlation key
@@ -46,6 +62,11 @@ SEVERITY_RANK: dict[str, int] = {
 }
 _DEFAULT_RANK = SEVERITY_RANK["warning"]
 
+# Severity at or above which a new peak always pages. Below it, a rise is
+# still just an open incident getting a little worse, and folding it in is
+# the whole point of correlating.
+PAGE_ON_ESCALATION_FLOOR = SEVERITY_RANK["high"]
+
 SignalIdentity = tuple[str, str, str]
 
 
@@ -69,6 +90,11 @@ def _is_identical_repeat(previous: MonitoringAlert, current: MonitoringAlert) ->
         and previous.metric == current.metric
         and previous.value == current.value
     )
+
+
+def _peak_rank(history: Sequence[MonitoringAlert]) -> int:
+    """The worst severity this correlation key has carried in the window."""
+    return max((_severity_rank(alert) for alert in history), default=0)
 
 
 def _has_flapped(history: Sequence[MonitoringAlert]) -> bool:
@@ -112,6 +138,18 @@ class FlapAwareCorrelator:
 
         if not history:
             return [_decision("route", current, "open_incident", "first alert observed for correlation key")]
+
+        current_rank = _severity_rank(current)
+        if current_rank >= PAGE_ON_ESCALATION_FLOOR and current_rank > _peak_rank(history):
+            return [
+                _decision(
+                    "route",
+                    current,
+                    "escalate_incident",
+                    f"severity rose to {current.severity}, above anything seen on this "
+                    "correlation key; high/critical is never folded in silently",
+                )
+            ]
 
         if _has_flapped(history):
             return [

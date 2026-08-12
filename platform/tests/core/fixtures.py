@@ -71,6 +71,25 @@ def severity_escalation() -> list[MonitoringAlert]:
     ]
 
 
+def second_incident_on_a_busy_key() -> list[MonitoringAlert]:
+    """A critical arriving on a key already open at warning level.
+
+    This is the shape that cost the corpus an incident: db_saturation@120
+    cascaded warnings through `catalog` for minutes, and when
+    catalog_degraded@900 opened with its own critical on the same service,
+    the open key absorbed it. The critical here belongs to a different
+    fault than the warnings before it and has to page.
+    """
+    labels = {"service": "catalog"}
+    warning = make_alert(
+        rule="high_latency", severity="warning", source="catalog-01", metric="latency_ms", value=800.0, labels=labels
+    )
+    return [
+        *(warning.model_copy(update={"alert_id": uuid4(), "value": 800.0 + i}) for i in range(5)),
+        warning.model_copy(update={"alert_id": uuid4(), "severity": "critical", "value": 4200.0}),
+    ]
+
+
 def flapping_alerts() -> list[MonitoringAlert]:
     """Rapidly toggling alert that should be suppressed."""
     base = make_alert(rule="service-up", source="zabbix", metric="up", value=1.0)
