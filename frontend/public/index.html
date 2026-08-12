@@ -1,462 +1,54 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Monitoring Platform</title>
-<style>
-  :root { color-scheme: dark; }
-  body { background:#10141d; color:#e8edf5; font:15px system-ui,sans-serif; margin:2rem; }
-  h1 { margin:0; font-size:1.4rem; display:inline-block; }
-  header { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
-  p { color:#9aa8bb; }
-  a.auth { color:#8bd5ff; text-decoration:none; font-size:.85rem; }
-  a.auth:hover { text-decoration:underline; }
-  nav { display:flex; gap:.5rem; margin:1.25rem 0 0; }
-  nav button { background:#1a2130; color:#9aa8bb; border:1px solid #2a3444; border-radius:.4rem; padding:.4rem .9rem; font-size:.85rem; cursor:pointer; }
-  nav button.active { background:#22314a; color:#e8edf5; border-color:#3a4d6e; }
-  table { width:100%; border-collapse:collapse; margin-top:1rem; }
-  th,td { text-align:left; padding:.55rem; border-bottom:1px solid #2a3444; }
-  th { color:#9aa8bb; font-size:.78rem; text-transform:uppercase; }
-  .badge { border-radius:1rem; padding:.16rem .5rem; font-size:.78rem; font-weight:700; }
-  .critical,.high { color:#ffb4b4; background:#7f1d1d; }
-  .warning,.average { color:#ffe4a3; background:#713f12; }
-  .info,.resolved { color:#a9e6b8; background:#14532d; }
-  code { color:#8bd5ff; }
-  #empty { color:#9aa8bb; margin-top:2rem; }
-  #login-required, #not-implemented { color:#9aa8bb; margin-top:2rem; display:none; }
-  #login-required a { color:#8bd5ff; }
-  #summary { display:flex; gap:.6rem; margin-top:.75rem; flex-wrap:wrap; }
-  #summary .chip { background:#1a2130; border:1px solid #2a3444; border-radius:.4rem; padding:.3rem .7rem; font-size:.8rem; color:#9aa8bb; }
-  #summary .chip b { color:#e8edf5; }
-  #forbidden { color:#9aa8bb; margin-top:2rem; display:none; }
-  #admin-panel { display:none; margin-top:1rem; }
-  .admin-card { background:#161b26; border:1px solid #2a3444; border-radius:.5rem; padding:1rem; margin-bottom:1rem; }
-  .admin-card h3 { margin:0 0 .2rem; font-size:1rem; }
-  .admin-card .subject { color:#9aa8bb; font-size:.78rem; margin-bottom:.6rem; }
-  .admin-card .roles { display:flex; gap:.35rem; margin-bottom:.7rem; flex-wrap:wrap; }
-  .admin-card .roles .badge { text-transform:none; }
-  .admin-row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin-top:.4rem; }
-  .admin-row label { color:#9aa8bb; font-size:.78rem; min-width:5.5rem; }
-  .admin-row input, .admin-row select {
-    background:#0d1117; color:#e8edf5; border:1px solid #2a3444; border-radius:.35rem;
-    padding:.3rem .5rem; font-size:.85rem;
-  }
-  .admin-row button {
-    background:#22314a; color:#e8edf5; border:1px solid #3a4d6e; border-radius:.35rem;
-    padding:.3rem .8rem; font-size:.8rem; cursor:pointer;
-  }
-  .ad-note { color:#9aa8bb; font-size:.75rem; margin:.6rem 0 .3rem; padding-top:.5rem; border-top:1px dashed #2a3444; }
-  .admin-status { font-size:.78rem; margin-top:.3rem; min-height:1em; }
-  .admin-status.ok { color:#a9e6b8; }
-  .admin-status.error { color:#ffb4b4; }
-</style>
+<!-- app.js:605 writes this on every theme switch and throws if it's absent,
+     which would abort bootstrap() before anything renders. -->
+<meta name="theme-color" content="#f8fafc">
+<title>Спокуха — управление инцидентами</title>
+<link rel="icon" href="/assets/spokukha-logo.png">
+<link rel="stylesheet" href="/app.css">
+<script>
+  // Ahead of app.css so a dark-theme user doesn't get a white flash before
+  // applyTheme() runs. Same key app.js persists to.
+  document.documentElement.dataset.theme = localStorage.getItem('spokukha-theme') || 'light';
+</script>
 </head>
 <body>
-<header>
-  <h1>Monitoring platform</h1>
-  <a class="auth" id="auth-link" href="/v1/auth/login">Log in</a>
+
+<aside class="sidebar" id="sidebar">
+  <div class="brand"><img src="/assets/spokukha-logo.png" alt=""><span>Спокуха</span></div>
+  <div class="nav-eyebrow" id="nav-eyebrow"></div>
+  <nav class="main-nav" id="main-nav" aria-label="Разделы"></nav>
+  <div class="sidebar-footer">
+    <div class="connection">
+      <span class="status-dot" id="connection-dot"></span>
+      <span id="connection-label">Проверка связи…</span>
+    </div>
+    <button class="theme-button" id="theme-button" type="button">Тёмная тема</button>
+  </div>
+</aside>
+
+<header class="topbar">
+  <button class="menu-button" id="menu-button" type="button" aria-label="Меню" aria-controls="sidebar">☰</button>
+  <div class="global-search">
+    <label class="sr-only" for="global-search">Поиск по разделу</label>
+    <input id="global-search" type="search" placeholder="Поиск по разделу" autocomplete="off">
+  </div>
+  <div class="account">
+    <span class="account-meta" id="account-meta"></span>
+    <a id="auth-link" href="/v1/auth/login">Войти</a>
+  </div>
 </header>
-<p id="meta">Loading...</p>
-<div id="summary"></div>
-<nav>
-  <button data-view="alerts" class="active">Alerts</button>
-  <button data-view="events">Events</button>
-  <button data-view="decisions">Decisions</button>
-  <button data-view="incidents">Incidents</button>
-  <button data-view="admin">Admin</button>
-</nav>
-<div id="login-required">Session expired or not logged in yet. <a id="login-required-link" href="/v1/auth/login">Log in</a> to see live data.</div>
-<div id="not-implemented">Not implemented yet on the server (501) — not "nothing to show", genuinely not built. See the platform README's "Incidents" section.</div>
-<div id="forbidden">Admin role required — you're logged in, but this identity doesn't have the "admin" role. Ask an existing admin to grant it via this same panel.</div>
-<div id="empty">No data yet.</div>
-<table id="table" hidden>
-<thead><tr id="head"></tr></thead>
-<tbody id="rows"></tbody>
-</table>
-<div id="admin-panel"></div>
-<script>
-const COLUMNS = {
-  alerts: {
-    endpoint: '/v1/alerts',
-    headers: ['Time', 'Severity', 'Rule', 'Source', 'Metric', 'Value', 'Correlation'],
-    row: (message) => {
-      const alert = message.data;
-      return [
-        new Date(message.occurred_at).toLocaleString(),
-        badge(alert.severity),
-        alert.rule, alert.source, alert.metric,
-        `${alert.value} / ${alert.threshold}`,
-        (message.correlation_id || '').slice(0, 8),
-      ];
-    },
-  },
-  events: {
-    endpoint: '/v1/events',
-    headers: ['Time', 'Status', 'Source', 'Metric', 'Value', 'Correlation'],
-    row: (message) => {
-      const event = message.data;
-      return [
-        new Date(message.occurred_at).toLocaleString(),
-        badge(event.status),
-        event.source, event.metric ?? '', event.value ?? '',
-        (message.correlation_id || '').slice(0, 8),
-      ];
-    },
-  },
-  decisions: {
-    endpoint: '/v1/decisions',
-    headers: ['Type', 'Action', 'Reason', 'Alert', 'Policy'],
-    row: (message) => {
-      const decision = message.data ?? message; // /v1/decisions returns Decision directly, not an envelope
-      return [
-        badge(decision.decision_type),
-        decision.action, decision.reason,
-        (decision.alert_id || '').slice(0, 8),
-        decision.policy_id ?? '',
-      ];
-    },
-  },
-  incidents: {
-    endpoint: '/v1/incidents',
-    headers: ['Status', 'Severity', 'Service', 'Alerts', 'Opened'],
-    row: () => [], // never reached today -- /v1/incidents always 501s, see below
-  },
-};
 
-function badge(text) {
-  return { __badge: String(text || '').toLowerCase() };
-}
+<main class="content" id="content"></main>
 
-// Cross-origin login: platform's session cookie is only ever valid for
-// the host that set it (TrueConf's OAuth2 redirect_uri is fixed there --
-// see platform/app/identity/return_to.py for the full reasoning), so when
-// this page isn't on that host, /v1/auth/callback instead hands the same
-// signed token back via URL fragment. Picked up once here, stored, and
-// sent as a Bearer header from then on -- fragments are never sent to any
-// server, so this is the only place it's ever visible in transit.
-const SESSION_STORAGE_KEY = 'platform_session_token';
+<div class="toast-region" id="toast-region" role="status" aria-live="polite"></div>
 
-function captureSessionTokenFromUrl() {
-  const match = /(?:^|#)session=([^&]+)/.exec(window.location.hash);
-  if (!match) return;
-  sessionStorage.setItem(SESSION_STORAGE_KEY, decodeURIComponent(match[1]));
-  history.replaceState(null, '', window.location.pathname + window.location.search);
-}
-
-function authHeaders() {
-  const token = sessionStorage.getItem(SESSION_STORAGE_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-function loginUrl() {
-  // Only meaningful cross-origin (see above); harmless same-origin, where
-  // the server ignores return_to unless it's allowlisted and just falls
-  // back to the cookie it always set.
-  return `/v1/auth/login?return_to=${encodeURIComponent(window.location.origin)}`;
-}
-
-function renderCell(value) {
-  const cell = document.createElement('td');
-  if (value && typeof value === 'object' && '__badge' in value) {
-    const span = document.createElement('span');
-    span.className = `badge ${value.__badge}`;
-    span.textContent = value.__badge;
-    cell.appendChild(span);
-  } else {
-    cell.textContent = value;
-  }
-  return cell;
-}
-
-let currentView = 'alerts';
-
-function resetStateDivs() {
-  document.getElementById('login-required').style.display = 'none';
-  document.getElementById('not-implemented').style.display = 'none';
-  document.getElementById('forbidden').style.display = 'none';
-}
-
-async function refresh() {
-  const view = COLUMNS[currentView];
-  const head = document.getElementById('head');
-  head.textContent = '';
-  for (const label of view.headers) {
-    const th = document.createElement('th');
-    th.textContent = label;
-    head.appendChild(th);
-  }
-
-  const response = await fetch(view.endpoint, { credentials: 'same-origin', headers: authHeaders() });
-  resetStateDivs();
-  const table = document.getElementById('table');
-  const empty = document.getElementById('empty');
-  const meta = document.getElementById('meta');
-
-  if (response.status === 401) {
-    document.getElementById('login-required').style.display = 'block';
-    table.hidden = true;
-    empty.hidden = true;
-    meta.textContent = 'Not logged in.';
-    return;
-  }
-
-  if (response.status === 501) {
-    document.getElementById('not-implemented').style.display = 'block';
-    table.hidden = true;
-    empty.hidden = true;
-    meta.textContent = `${currentView}: not implemented.`;
-    return;
-  }
-
-  const messages = await response.json();
-  meta.textContent = `${messages.length} ${currentView} from the platform; refreshing every 3 seconds`;
-  empty.hidden = messages.length > 0;
-  table.hidden = messages.length === 0;
-
-  const rows = document.getElementById('rows');
-  rows.textContent = '';
-  for (const message of messages) {
-    const row = document.createElement('tr');
-    for (const value of view.row(message)) row.appendChild(renderCell(value));
-    rows.appendChild(row);
-  }
-}
-
-// Admin panel: identities + roles WE assign within this platform -- a
-// TrueConf identity's role here (viewer/engineer/admin/anything an admin
-// types) is entirely our own data (app/identity/models.py's identity_roles
-// table), fully ours to manage.
-//
-// The AD fields are a different thing and are labeled as such in the UI:
-// this platform does not create, modify, or otherwise administer real
-// Active Directory accounts. AD here is what platform/README.md/АР-07 call
-// a nominal attribute source -- department/team text an admin records
-// against an identity for routing purposes, stored only in our own
-// database (app/identity/models.py:AdAccountLink), never written back to
-// any real directory. Saving it here has zero effect on the actual AD DC.
-async function renderAdmin() {
-  const panel = document.getElementById('admin-panel');
-  const table = document.getElementById('table');
-  const empty = document.getElementById('empty');
-  const meta = document.getElementById('meta');
-  table.hidden = true;
-  empty.hidden = true;
-  panel.style.display = 'none';
-
-  const [identitiesResponse, rolesResponse] = await Promise.all([
-    fetch('/v1/identities', { credentials: 'same-origin', headers: authHeaders() }),
-    fetch('/v1/auth/roles', { credentials: 'same-origin', headers: authHeaders() }),
-  ]);
-  resetStateDivs();
-
-  if (identitiesResponse.status === 401 || rolesResponse.status === 401) {
-    document.getElementById('login-required').style.display = 'block';
-    meta.textContent = 'Not logged in.';
-    return;
-  }
-  if (identitiesResponse.status === 403 || rolesResponse.status === 403) {
-    document.getElementById('forbidden').style.display = 'block';
-    meta.textContent = 'Admin role required.';
-    return;
-  }
-
-  const identities = await identitiesResponse.json();
-  const roles = await rolesResponse.json();
-  meta.textContent = `${identities.length} identities. Admin panel does not auto-refresh (so it never clobbers an edit in progress) -- switch tabs and back to reload.`;
-  panel.style.display = 'block';
-  panel.innerHTML = '';
-  for (const identity of identities) panel.appendChild(renderIdentityCard(identity, roles));
-}
-
-function renderIdentityCard(identity, roles) {
-  const card = document.createElement('div');
-  card.className = 'admin-card';
-
-  const title = document.createElement('h3');
-  title.textContent = identity.display_label || '(no display name)';
-  card.appendChild(title);
-
-  const subject = document.createElement('div');
-  subject.className = 'subject';
-  subject.textContent = identity.identity_id;
-  card.appendChild(subject);
-
-  const roleBadges = document.createElement('div');
-  roleBadges.className = 'roles';
-  for (const roleId of identity.roles) {
-    const span = document.createElement('span');
-    span.className = 'badge';
-    span.style.background = '#22314a';
-    span.style.color = '#e8edf5';
-    span.textContent = roleId;
-    roleBadges.appendChild(span);
-  }
-  card.appendChild(roleBadges);
-
-  const status = document.createElement('div');
-  status.className = 'admin-status';
-
-  // Role assignment -- entirely ours: app/identity/models.py's
-  // identity_roles table, nothing to do with TrueConf or AD.
-  const roleRow = document.createElement('div');
-  roleRow.className = 'admin-row';
-  const roleLabel = document.createElement('label');
-  roleLabel.textContent = 'Grant role';
-  const roleSelect = document.createElement('select');
-  for (const role of roles) {
-    const option = document.createElement('option');
-    option.value = role.role_id;
-    option.textContent = `${role.role_id}${identity.roles.includes(role.role_id) ? ' (already has it)' : ''}`;
-    roleSelect.appendChild(option);
-  }
-  const roleButton = document.createElement('button');
-  roleButton.textContent = 'Assign';
-  roleButton.onclick = async () => {
-    status.textContent = 'Saving...';
-    status.className = 'admin-status';
-    const response = await fetch(`/v1/identities/${identity.identity_id}/roles`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role_id: roleSelect.value }),
-    });
-    if (response.ok) {
-      const updated = await response.json();
-      status.textContent = `Roles now: ${updated.roles.join(', ')}`;
-      status.className = 'admin-status ok';
-    } else {
-      status.textContent = `Failed (${response.status})`;
-      status.className = 'admin-status error';
-    }
-  };
-  roleRow.append(roleLabel, roleSelect, roleButton);
-  card.appendChild(roleRow);
-
-  // AD reference fields -- see the function's leading comment: this is
-  // our own nominal copy for routing, not real AD administration.
-  const adNote = document.createElement('div');
-  adNote.className = 'ad-note';
-  adNote.textContent = 'AD reference (ours only -- we do not create or manage real Active Directory accounts here; see platform/README.md, АР-07):';
-  card.appendChild(adNote);
-
-  const adLoginInput = fieldInput('AD login', identity.ad_login);
-  const departmentInput = fieldInput('Department', identity.department);
-  const teamInput = fieldInput('Team', identity.team);
-  card.append(adLoginInput.row, departmentInput.row, teamInput.row);
-
-  const adRow = document.createElement('div');
-  adRow.className = 'admin-row';
-  const adButton = document.createElement('button');
-  adButton.textContent = 'Save AD reference';
-  adButton.onclick = async () => {
-    status.textContent = 'Saving...';
-    status.className = 'admin-status';
-    const response = await fetch(`/v1/identities/${identity.identity_id}/ad-link`, {
-      method: 'PUT',
-      credentials: 'same-origin',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ad_login: adLoginInput.input.value,
-        department: departmentInput.input.value,
-        team: teamInput.input.value,
-      }),
-    });
-    if (response.ok) {
-      status.textContent = 'AD reference saved.';
-      status.className = 'admin-status ok';
-    } else {
-      status.textContent = `Failed (${response.status})`;
-      status.className = 'admin-status error';
-    }
-  };
-  adRow.appendChild(adButton);
-  card.appendChild(adRow);
-
-  card.appendChild(status);
-  return card;
-}
-
-function fieldInput(labelText, value) {
-  const row = document.createElement('div');
-  row.className = 'admin-row';
-  const label = document.createElement('label');
-  label.textContent = labelText;
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.value = value || '';
-  row.append(label, input);
-  return { row, input };
-}
-
-async function refreshSummary() {
-  const response = await fetch('/v1/summary', { credentials: 'same-origin', headers: authHeaders() });
-  const summary = document.getElementById('summary');
-  if (!response.ok) { summary.textContent = ''; return; }
-
-  const data = await response.json();
-  const chips = [
-    `<span class="chip"><b>${data.events_in_window}</b> events</span>`,
-    `<span class="chip"><b>${data.alerts_in_window}</b> alerts</span>`,
-  ];
-  for (const [severity, count] of Object.entries(data.alerts_by_severity)) {
-    chips.push(`<span class="chip badge ${severity}">${count} ${severity}</span>`);
-  }
-  chips.push(`<span class="chip">window: last ${data.window_limit}</span>`);
-  summary.innerHTML = chips.join('');
-}
-
-async function updateAuthLink() {
-  const link = document.getElementById('auth-link');
-  link.href = loginUrl();
-  // The same URL for the "log in" link inside the logged-out notice. It
-  // carries return_to; without it the callback has no idea which origin to
-  // hand the finished login back to, and now that the callback is served
-  // from the TrueConf origin (see trueconf-tls/README.md) that lands the
-  // browser on TrueConf's own 404 page rather than here.
-  document.getElementById('login-required-link').href = loginUrl();
-  const response = await fetch('/v1/auth/me', { credentials: 'same-origin', headers: authHeaders() });
-  if (response.ok) {
-    const identity = await response.json();
-    link.textContent = `Log out (${identity.display_label || identity.trueconf_subject || 'signed in'})`;
-    link.href = '#';
-    link.onclick = async (event) => {
-      event.preventDefault();
-      await fetch('/v1/auth/logout', { method: 'POST', credentials: 'same-origin', headers: authHeaders() });
-      sessionStorage.removeItem(SESSION_STORAGE_KEY);
-      window.location.reload();
-    };
-  }
-}
-
-function showView() {
-  const isAdmin = currentView === 'admin';
-  document.getElementById('table').hidden = isAdmin || document.getElementById('table').hidden;
-  document.getElementById('admin-panel').style.display = isAdmin ? 'block' : 'none';
-  if (isAdmin) {
-    renderAdmin();
-  } else {
-    document.getElementById('admin-panel').style.display = 'none';
-    refresh();
-  }
-}
-
-for (const button of document.querySelectorAll('nav button')) {
-  button.addEventListener('click', () => {
-    document.querySelector('nav button.active').classList.remove('active');
-    button.classList.add('active');
-    currentView = button.dataset.view;
-    showView();
-  });
-}
-
-captureSessionTokenFromUrl();
-updateAuthLink();
-showView();
-refreshSummary();
-// Admin intentionally excluded from the auto-refresh loop -- see
-// renderAdmin's comment: it must never clobber an in-progress edit.
-setInterval(() => { if (currentView !== 'admin') refresh(); refreshSummary(); }, 3000);
-</script>
+<!-- defer: app.js resolves #content/#main-nav/#global-search and binds
+     #theme-button/#menu-button at top level, so the shell above must exist
+     before it runs. -->
+<script src="/app.js" defer></script>
 </body>
 </html>

@@ -17,22 +17,43 @@ landing page) as the primary way to look at the platform, but doesn't
 remove it — that page is unaffected and still served directly by
 `platform` at its own `/`.
 
+The UI is in Russian and split into two nav groups: **УПРАВЛЕНИЕ**
+(Сводка, Пользователи, Матрица ответственности, Системы, Маршрутизация,
+Роли и права доступа, Политики SLA, Интеграции, Аудит) and **МОНИТОРИНГ**
+(Инциденты, Алерты, События, Решения корреляции).
+
+Only some of that is live. Сводка, Системы, Алерты, События, Решения
+корреляции and Пользователи read the platform; the rest are Figma-macket
+screens rendered from constants in `app.js` and marked as such at the top
+of the page by `designBanner()` — they are honest placeholders, not
+mock data pretending to be real. Every button on those screens carries
+`data-protected` and answers with a toast rather than silently doing
+nothing.
+
 ## API it talks to
 
-- `GET /v1/alerts`, `GET /v1/events`, `GET /v1/decisions` — the read-only
-  tabs. Require an authenticated session (see below); a 401 shows a
-  "log in" prompt instead of an empty table.
+- `GET /health`, `GET /v1/contours` — the only two calls that work logged
+  out. They drive the sidebar connection dot, the platform-health card and
+  the Системы page.
+- `GET /v1/summary`, `GET /v1/alerts`, `GET /v1/events`, `GET /v1/decisions`
+  — the live read-only views. A 401 on any of them drops Сводка into its
+  macket state with the banner explaining why, rather than showing an
+  error.
+- `GET /v1/incidents` (+ `/{id}/ack`) — **always 501 today** on purpose;
+  see `INCIDENTS_NOT_IMPLEMENTED` in `platform/app/main.py`. `renderOverview`
+  therefore requests it outside its `Promise.all` and tolerates 501
+  alongside 401/403, so the landing page degrades to an empty "Требуют
+  внимания" card instead of an error screen. The Инциденты tab itself does
+  surface the 501 — that page has nothing else to show.
 - `GET /v1/auth/me`, `GET /v1/auth/login`, `POST /v1/auth/logout` — the
-  header's auth link.
-- `GET /v1/identities`, `GET /v1/auth/roles`, `POST /v1/identities/{id}/roles`,
-  `PUT /v1/identities/{id}/ad-link` — the Admin tab. Requires the `admin`
-  role (a 403 shows a distinct "admin role required" message, not the same
-  401 as being logged out). Role grants are real platform-only data
-  (`identity_roles`); the AD fields on that same tab are explicitly labeled
-  as a local reference copy only — this never creates or touches a real
-  Active Directory account, see `platform/README.md`'s note on the same
-  endpoint and АР-07. Doesn't auto-refresh like the other tabs, on purpose:
-  refreshing mid-edit would clobber whatever you were typing.
+  account block in the top bar. With OAuth unconfigured (`health.auth !==
+  'configured'`) the link says so instead of offering a login that cannot
+  complete.
+- `GET /v1/identities`, `POST /v1/identities/{id}/roles` — the Пользователи
+  page. Role grants are real platform-only data (`identity_roles`); the AD
+  columns are a local reference copy only — this never creates or touches a
+  real Active Directory account, see `platform/README.md`'s note on the same
+  endpoint and АР-07.
 
 ## Start (local or VM)
 
@@ -71,8 +92,27 @@ scripts/deploy.sh frontend frontend http://localhost:8091/health
 
 ## Files
 
-- `public/` — the static site (`index.html`, self-contained: no bundler,
-  no external JS dependencies fetched at runtime).
+- `public/` — the static site, self-contained: no bundler, no external JS
+  or fonts fetched at runtime.
+  - `index.html` — the shell only. It renders nothing itself; it supplies
+    the twelve elements `app.js` resolves by id (`sidebar`, `nav-eyebrow`,
+    `main-nav`, `connection-dot`, `connection-label`, `theme-button`,
+    `menu-button`, `global-search`, `account-meta`, `auth-link`, `content`,
+    `toast-region`) plus the `theme-color` meta tag that `applyTheme()`
+    writes to. Removing any of them breaks `bootstrap()` outright, so the
+    two files have to change together.
+  - `app.js` — every view, rendered client-side into `#content`.
+  - `app.css` — light/dark tokens on `:root` / `:root[data-theme="dark"]`;
+    the theme choice persists in `localStorage` under `spokukha-theme` and
+    is applied by an inline script in `index.html` before first paint to
+    avoid a light flash.
+  - `assets/` — the logo, used by the brand mark, the favicon and the
+    logged-out screen.
 - `nginx.conf.template` — nginx substitutes `${PLATFORM_UPSTREAM}` into
   this at container start (built into `nginx:alpine`'s entrypoint; see the
   comment in `Dockerfile`).
+
+**Keep all four under `public/` in git.** `scripts/deploy.sh` rsyncs
+without `--delete`, so anything that exists only on the VM survives
+deploys invisibly until a same-named file in the repo overwrites it — which
+is exactly how the original `index.html` was lost once already.
