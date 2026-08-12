@@ -177,10 +177,10 @@ async function renderOverview() {
     live = false;
   }
   if (live) {
-    // /v1/incidents is a deliberate 501 until incident grouping ships (see
-    // INCIDENTS_NOT_IMPLEMENTED in platform/app/main.py). Kept out of the
-    // Promise.all above so it degrades to an empty "Требуют внимания" card
-    // instead of turning the whole landing page into an error screen.
+    // Kept out of the Promise.all above so an incident-projection failure
+    // degrades to an empty "Требуют внимания" card rather than turning the
+    // whole landing page into an error screen. 501 is still tolerated: an
+    // older platform build behind this frontend answers that way.
     try {
       incidents = await api(API.incidents);
     } catch (error) {
@@ -207,6 +207,7 @@ async function renderOverview() {
   const criticalAlerts = summary.alerts_by_severity?.critical || 0;
   const correlated = (summary.decisions_by_type?.dedup || 0) + (summary.decisions_by_type?.suppress || 0);
   const correlationRate = summary.alerts_in_window ? Math.round((correlated / summary.alerts_in_window) * 100) : 0;
+  const openIncidents = incidents.filter((item) => item.status === 'open');
   const attention = incidents.filter((item) => item.status !== 'resolved').slice(0, 5);
   const bars = Object.entries(summary.alerts_by_severity || {});
   const maxBar = Math.max(1, ...bars.map(([, value]) => value));
@@ -216,14 +217,14 @@ async function renderOverview() {
     <div class="kpi-grid">
       ${kpi('События', summary.events_in_window, 'В текущем окне')}
       ${kpi('Алерты', summary.alerts_in_window, `${criticalAlerts} критических`, criticalAlerts ? 'critical' : '')}
-      ${kpi('Открытые инциденты', summary.open_incidents ?? attention.length, `${summary.incidents_in_window ?? incidents.length} всего`) }
+      ${kpi('Открытые инциденты', summary.open_incidents ?? openIncidents.length, `${summary.incidents_in_window ?? incidents.length} всего`, openIncidents.some((item) => item.severity === 'critical') ? 'critical' : '')}
       ${kpi('Корреляция', `${correlationRate}%`, `${correlated} объединено`, 'success')}
       ${kpi('Состояние платформы', health.status === 'ok' ? 'Исправно' : 'Ошибка', `Kafka: ${health.kafka}`, health.status === 'ok' ? 'success' : 'critical')}
     </div>
     <div class="overview-grid">
       <article class="card"><h2>Алерты по критичности</h2>${bars.length ? `<div class="bar-chart">${bars.map(([label, value]) => `<div class="bar-column"><span class="bar-value">${formatNumber(value)}</span><span class="bar" style="height:${Math.max(4, Math.round(value / maxBar * 88))}px"></span><span>${escapeHtml(label)}</span></div>`).join('')}</div>` : emptyInline('Пока нет алертов в живом окне.')}</article>
       <article class="card"><h2>Состояние платформы</h2><ul class="health-list">${healthRows(health, systems)}</ul></article>
-      <article class="card full"><h2>Требуют внимания</h2>${attention.length ? `<ul class="attention-list">${attention.map((item) => `<li class="attention-row"><div class="attention-copy"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.service)} · ${formatDate(item.updated_at)} · ${item.alert_count} алерт(а)</span></div>${badge(item.severity)}</li>`).join('')}</ul>` : emptyInline('Открытых инцидентов сейчас нет.')}</article>
+      <article class="card full"><h2>Требуют внимания</h2>${attention.length ? `<ul class="attention-list">${attention.map((item) => `<li class="attention-row"><div class="attention-copy"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(incidentScope(item))} · ${formatDate(item.updated_at)} · ${item.alert_count} алерт(а)${item.status === 'acknowledged' ? ` · принят: ${escapeHtml(item.acknowledged_by_label || item.acknowledged_by)}` : ''}</span></div>${badge(item.severity)}</li>`).join('')}</ul>` : emptyInline('Открытых инцидентов сейчас нет.')}</article>
       <article class="card full"><h2>Последние алерты</h2>${alerts.length ? compactAlerts(alerts.slice(0, 5)) : emptyInline('Алерты появятся после поступления данных мониторинга.')}</article>
     </div>
     <div class="page-actions"><span class="refresh-meta">Обновлено ${new Date().toLocaleTimeString('ru-RU')}</span><button class="button secondary" id="refresh-view">Обновить</button></div>
@@ -260,27 +261,43 @@ function compactAlerts(items) {
   }).join('')}</tbody></table></div>`;
 }
 
+/** Service label, falling back to the correlation key it was grouped on.
+ *  An alert without a `service` label still forms an incident — keyed on
+ *  (source, metric) — and showing "null" for it would be worse than showing
+ *  the key the correlator actually used. */
+function incidentScope(item) {
+  return item.service || item.correlation_key || '—';
+}
+
 async function renderIncidents() {
   const items = await api(API.incidents);
   renderDataTable({
     title: 'Инциденты',
     subtitle: 'Сгруппированные алерты, требующие реакции оператора',
     cardTitle: `${items.length} инцидентов в живом окне`,
-    filters: [{ key: 'status', label: 'Статус', values: ['', 'open', 'acknowledged', 'resolved'] }, { key: 'severity', label: 'Критичность', values: ['', 'critical', 'high', 'average', 'warning', 'info'] }],
+    filters: [{ key: 'status', label: 'Статус', values: ['', 'open', 'acknowledged'] }, { key: 'severity', label: 'Критичность', values: ['', 'critical', 'high', 'average', 'warning', 'info'] }],
     items,
-    searchFields: (item) => [item.title, item.service, item.incident_id, item.correlation_key],
-    columns: ['Инцидент', 'Статус', 'Критичность', 'Система', 'Алерты', 'Открыт', 'Обновлён', 'Действие'],
+    searchFields: (item) => [item.title, item.service, item.incident_id, item.correlation_key, item.page_reason],
+    columns: ['Инцидент', 'Статус', 'Критичность', 'Система', 'Алерты', 'Уведомлений', 'Обновлён', 'Действие'],
     row: (item) => [
-      `<span class="cell-title">${escapeHtml(item.title)}</span><span class="cell-subtitle mono">INC-${shortId(item.incident_id)}</span>`,
-      badge(item.status, { open: 'Открыт', acknowledged: 'Принят', resolved: 'Закрыт' }[item.status] || item.status),
-      badge(item.severity), escapeHtml(item.service), formatNumber(item.alert_count), formatDate(item.opened_at), formatDate(item.updated_at),
+      // The reason line is the point of the screen: it is the correlator's own
+      // explanation of why this incident exists, quoted rather than restated.
+      `<span class="cell-title">${escapeHtml(item.title)}</span><span class="cell-subtitle mono">INC-${shortId(item.incident_id)}</span>${item.page_reason ? `<span class="cell-subtitle">${escapeHtml(item.page_reason)}</span>` : ''}`,
+      item.status === 'acknowledged'
+        ? `${badge('acknowledged', 'Принят')}<span class="cell-subtitle">${escapeHtml(item.acknowledged_by_label || item.acknowledged_by || '')}</span>`
+        : badge(item.status, { open: 'Открыт' }[item.status] || item.status),
+      badge(item.severity), escapeHtml(incidentScope(item)), formatNumber(item.alert_count), formatNumber(item.notification_count), formatDate(item.updated_at),
       item.status === 'open' && hasRole('engineer', 'admin') ? `<button class="button small" data-ack="${escapeHtml(item.incident_id)}">Принять</button>` : '—',
     ],
   });
   content.querySelectorAll('[data-ack]').forEach((button) => button.addEventListener('click', async () => {
     button.disabled = true;
     try {
-      await api(`${API.incidents}/${button.dataset.ack}/ack`, { method: 'POST' });
+      await api(`${API.incidents}/${button.dataset.ack}/ack`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: null }),
+      });
       toast('Инцидент принят в работу');
       renderCurrentView();
     } catch (error) { button.disabled = false; toast(error.message, 'error'); }

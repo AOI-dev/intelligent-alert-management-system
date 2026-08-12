@@ -39,12 +39,14 @@ nothing.
   — the live read-only views. A 401 on any of them drops Сводка into its
   macket state with the banner explaining why, rather than showing an
   error.
-- `GET /v1/incidents` (+ `/{id}/ack`) — **always 501 today** on purpose;
-  see `INCIDENTS_NOT_IMPLEMENTED` in `platform/app/main.py`. `renderOverview`
-  therefore requests it outside its `Promise.all` and tolerates 501
-  alongside 401/403, so the landing page degrades to an empty "Требуют
-  внимания" card instead of an error screen. The Инциденты tab itself does
-  surface the 501 — that page has nothing else to show.
+- `GET /v1/incidents` (+ `/{id}/ack`) — live incidents derived from the
+  correlator's decisions (`platform/app/monitoring/incidents.py`). The
+  Инциденты table shows each incident's `page_reason` — the correlator's own
+  explanation of why it paged — rather than restating it, and the Принять
+  button POSTs the ack. `renderOverview` still requests this outside its
+  `Promise.all` and still tolerates 501 alongside 401/403, so an older
+  platform behind this frontend degrades to an empty "Требуют внимания" card
+  rather than an error screen.
 - `GET /v1/auth/me`, `GET /v1/auth/login`, `POST /v1/auth/logout` — the
   account block in the top bar. With OAuth unconfigured (`health.auth !==
   'configured'`) the link says so instead of offering a login that cannot

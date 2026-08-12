@@ -11,13 +11,15 @@ than failing fast -- exactly this sandbox's situation. Calling the route
 functions directly (they're plain async functions FastAPI's decorators
 register but don't wrap) exercises the same code with none of that.
 """
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
 
 import app.main as main_module
+from app.contracts.messages import Decision, MonitoringAlert
 from app.identity.models import Identity
+from app.monitoring.incidents import IncidentProjection
 
 FAKE_IDENTITY = Identity(id=uuid4(), trueconf_subject="test-subject", display_label="Test User")
 
@@ -77,30 +79,73 @@ async def test_get_alert_404s_when_not_in_the_retained_window():
     assert excinfo.value.status_code == 404
 
 
+def _routed(alert):
+    return Decision(
+        decision_type="route",
+        alert_id=alert.alert_id,
+        action="open_incident",
+        reason="first alert observed for correlation key",
+        policy_id="flap-aware-correlator/v1",
+    )
+
+
+@pytest.fixture
+def one_open_incident(monkeypatch):
+    """A projection holding exactly one incident, swapped in for the module's."""
+    projection = IncidentProjection(limit=10)
+    alert = MonitoringAlert(
+        rule="high_cpu", severity="critical", source="db-01", metric="cpu_percent",
+        value=97.0, threshold=90.0, labels={"service": "db_primary"},
+    )
+    projection.observe(alert, [_routed(alert)])
+    monkeypatch.setattr(main_module, "incidents", projection)
+    return projection.list()[0]
+
+
 @pytest.mark.asyncio
-async def test_incidents_are_an_honest_501_not_a_fake_empty_list():
-    """Deliberately not testing for [] here -- an empty list would look
-    identical to "no incidents right now", which is a lie when the truth
-    is "incidents aren't implemented". See main.py's INCIDENTS_NOT_IMPLEMENTED.
-    """
-    with pytest.raises(HTTPException) as excinfo:
-        await main_module.list_incidents(_=FAKE_IDENTITY)
+async def test_incidents_list_reports_what_the_correlator_decided(one_open_incident):
+    listed = await main_module.list_incidents(_=FAKE_IDENTITY)
 
-    assert excinfo.value.status_code == 501
-    assert "not implemented" in excinfo.value.detail
+    assert [i["incident_id"] for i in listed] == [one_open_incident["incident_id"]]
+    assert listed[0]["status"] == "open"
+    assert listed[0]["service"] == "db_primary"
+    # The screen has to be able to say *why* this paged, not just that it did.
+    assert listed[0]["policy_id"] == "flap-aware-correlator/v1"
 
 
 @pytest.mark.asyncio
-async def test_incident_detail_is_also_a_501():
+async def test_incidents_list_filters_by_status(one_open_incident):
+    assert await main_module.list_incidents(status="acknowledged", _=FAKE_IDENTITY) == []
+    assert len(await main_module.list_incidents(status="open", _=FAKE_IDENTITY)) == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_incident_is_a_404_not_an_empty_object(one_open_incident):
     with pytest.raises(HTTPException) as excinfo:
         await main_module.get_incident(uuid4(), _=FAKE_IDENTITY)
 
-    assert excinfo.value.status_code == 501
+    assert excinfo.value.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_incident_ack_is_also_a_501():
-    with pytest.raises(HTTPException) as excinfo:
-        await main_module.acknowledge_incident(uuid4(), _=FAKE_IDENTITY)
+async def test_ack_records_the_authenticated_session_not_a_client_supplied_name(one_open_incident):
+    """The acknowledger is taken from the session. An ack whose author the
+    caller can choose proves nothing about who actually responded."""
+    incident_id = UUID(one_open_incident["incident_id"])
 
-    assert excinfo.value.status_code == 501
+    acked = await main_module.acknowledge_incident(
+        incident_id, body=main_module.AcknowledgementBody(note="проверяю реплику"), identity=FAKE_IDENTITY
+    )
+
+    assert acked["status"] == "acknowledged"
+    assert acked["acknowledged_by"] == str(FAKE_IDENTITY.id)
+    assert acked["acknowledged_by_label"] == "Test User"
+    assert acked["acknowledgement_note"] == "проверяю реплику"
+
+
+@pytest.mark.asyncio
+async def test_ack_of_an_unknown_incident_is_a_404(one_open_incident):
+    with pytest.raises(HTTPException) as excinfo:
+        await main_module.acknowledge_incident(uuid4(), body=None, identity=FAKE_IDENTITY)
+
+    assert excinfo.value.status_code == 404

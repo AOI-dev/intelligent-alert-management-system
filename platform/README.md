@@ -108,9 +108,10 @@ page at `http://<host>:8100/`.
 - `GET /v1/decisions` — output of `app/core/`; query param: `decision_type`
 - `GET /v1/summary` — counts (alerts by severity, decisions by type) over
   the current retained window; the `frontend/` dashboard's header widget
-- `GET /v1/incidents`, `GET /v1/incidents/{id}`,
-  `POST /v1/incidents/{id}/ack` — **stubs**: always `501`, on purpose (see
-  below), since incidents aren't implemented
+- `GET /v1/incidents` (query params: `status`, `severity`),
+  `GET /v1/incidents/{id}`, `POST /v1/incidents/{id}/ack` — the incident
+  read model (`app/monitoring/incidents.py`); see below for what an
+  incident is derived from and what it deliberately does not claim
 - `POST /v1/integrations/{slug}/webhook` — generic dispatch to whichever
   `WebhookAlertSource` claims `slug`; built in today as `alertmanager` and
   `zabbix` (see "Monitoring client adapters" below)
@@ -145,11 +146,29 @@ time-range/audit queries once volume or retention needs exceed the
 window, which is what the still-pending TimescaleDB projection is for
 instead of stretching this cache to cover both jobs.
 
-`/v1/incidents*` are real endpoints that always return `501`, not stubs
-that fake success with an empty list — an empty list would look
-identical to "no incidents right now," which isn't true; the honest
-answer is "this isn't implemented yet." See `INCIDENTS_NOT_IMPLEMENTED`
-in `app/main.py`.
+`/v1/incidents*` read `IncidentProjection`
+(`app/monitoring/incidents.py`), which is the same live-tail window seen
+from a different angle: an incident is a correlation key that the core
+decided somebody should be paged about. It is keyed by
+`app/routing/service.py:incident_id_for`, the same derivation the
+notifications dispatcher dedups on, so the incident acknowledged on the
+dashboard is by construction the one the on-call engineer was paged
+about.
+
+Two things it deliberately does not do. It does not open an incident for
+an alert that was only deduped or suppressed — an incident means "we
+paged", and a suppressed flap is the opposite. And there is no
+`resolved` status: nothing publishes a resolution signal, and inferring
+one from "we stopped hearing about it" would be a guess presented as a
+fact. Statuses are `open` and `acknowledged`, and a fresh page on an
+acknowledged incident reopens it, because an ack of "the database is
+slow" cannot also ack "the database is now critical".
+
+The acknowledger is taken from the authenticated session, never from the
+request body: an ack whose author the caller can choose proves nothing
+about who responded. Only the pseudonymous identity id is authoritative
+(АР-07); the display label rides along for rendering and lives no longer
+than the in-memory projection.
 
 ## Monitoring client adapters
 

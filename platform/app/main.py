@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from prometheus_client import Counter
 from prometheus_fastapi_instrumentator import Instrumentator
+from pydantic import BaseModel
 
 from app.ai.client import configured as ai_configured
 from app.ai.service import EnrichmentService
@@ -41,6 +42,7 @@ from app.integration.kafka_consumer import KafkaTopicConsumer
 from app.integration.kafka_producer import KafkaProducer
 from app.integration.normalizers import normalize_zabbix_problem, to_event_data
 from app.integration.zabbix import ZabbixApiClient
+from app.monitoring.incidents import IncidentProjection
 from app.monitoring.persistence import init_monitoring_models, log_alert, log_decision, log_event
 from app.monitoring.query import filter_messages, find_by_field, summarize
 from app.monitoring.store import MessageStore
@@ -88,7 +90,8 @@ notification_router = NotificationRouter(routing_registry)
 notification_slots = asyncio.Semaphore(NOTIFICATION_CONCURRENCY)
 events = MessageStore(HISTORY_LIMIT)
 alerts = MessageStore(HISTORY_LIMIT)
-decisions = MessageStore(HISTORY_LIMIT)
+decisions = MessageStore(HISTORY_LIMIT, id_field="decision_id")
+incidents = IncidentProjection(HISTORY_LIMIT)
 consumed_total = Counter("platform_kafka_messages_total", "Kafka messages consumed", ["topic", "outcome"])
 produced_total = Counter("platform_kafka_published_total", "Kafka messages published", ["topic", "source"])
 webhooks_total = Counter("platform_webhooks_total", "Monitoring webhooks received", ["source", "outcome"])
@@ -141,6 +144,8 @@ async def handle_alert(message: MessageEnvelope) -> None:
         seen.add(identity)
         decisions_for_alert.append(decision)
         await publish_decision(decision, message.correlation_id)
+
+    incidents.observe(alert, decisions_for_alert, message.occurred_at)
 
     if NOTIFICATIONS_ENABLED:
         for decision in decisions_for_alert:
@@ -529,27 +534,55 @@ async def list_decisions(
     return filter_messages(decisions.list(), None, decision_type=decision_type)
 
 
-INCIDENTS_NOT_IMPLEMENTED = (
-    "incidents are not implemented yet -- monitoring.incident-events.v1 is a defined "
-    "contract that nothing publishes to; see README's Incidents section. This is a "
-    "stub returning 501 on purpose, not an empty result set standing in for 'no "
-    "incidents' -- those are different things and conflating them would be a lie."
-)
+class AcknowledgementBody(BaseModel):
+    note: str | None = None
 
 
 @app.get("/v1/incidents")
-async def list_incidents(_: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> list[dict]:
-    raise HTTPException(status_code=501, detail=INCIDENTS_NOT_IMPLEMENTED)
+async def list_incidents(
+    status: str | None = None,
+    severity: str | None = None,
+    _: Identity = Depends(ANY_AUTHENTICATED_ROLE),
+) -> list[dict]:
+    """Incidents in the live-tail window (app/monitoring/incidents.py).
+
+    Bounded and rebuilt on restart, exactly like /v1/alerts -- this answers
+    "what is happening now", not "what happened in March". Nothing is
+    published to monitoring.incident-events.v1 yet, so an incident here is
+    derived from decisions rather than replayed from its own topic.
+    """
+    return filter_messages(incidents.list(), None, status=status, severity=severity)
 
 
 @app.get("/v1/incidents/{incident_id}")
 async def get_incident(incident_id: UUID, _: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> dict:
-    raise HTTPException(status_code=501, detail=INCIDENTS_NOT_IMPLEMENTED)
+    found = incidents.get(incident_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="incident not found in the retained window")
+    return found
 
 
 @app.post("/v1/incidents/{incident_id}/ack")
-async def acknowledge_incident(incident_id: UUID, _: Identity = Depends(ANY_AUTHENTICATED_ROLE)) -> dict:
-    raise HTTPException(status_code=501, detail=INCIDENTS_NOT_IMPLEMENTED)
+async def acknowledge_incident(
+    incident_id: UUID,
+    body: AcknowledgementBody | None = None,
+    identity: Identity = Depends(ANY_AUTHENTICATED_ROLE),
+) -> dict:
+    """Record that a named human has taken this incident.
+
+    The acknowledger is the authenticated session, never a field in the
+    request body: an ack whose author the client can choose proves nothing
+    about who actually responded.
+    """
+    acknowledged = incidents.acknowledge(
+        incident_id,
+        by=str(identity.id),
+        display_label=identity.display_label,
+        note=body.note if body else None,
+    )
+    if acknowledged is None:
+        raise HTTPException(status_code=404, detail="incident not found in the retained window")
+    return acknowledged
 
 
 async def _require_producer() -> KafkaProducer:

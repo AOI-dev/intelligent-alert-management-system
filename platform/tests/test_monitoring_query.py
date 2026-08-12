@@ -3,7 +3,11 @@
 exercised directly against app.monitoring.query, without FastAPI, auth, or
 Kafka in the loop, since that's all real logic these endpoints run.
 """
+from uuid import uuid4
+
+from app.contracts.messages import Decision
 from app.monitoring.query import filter_messages, find_by_field, summarize
+from app.monitoring.store import MessageStore
 
 
 def _envelope(data: dict, occurred_at: str = "2026-01-01T00:00:00+00:00") -> dict:
@@ -109,3 +113,21 @@ def test_summarize_with_no_data_returns_zeroed_counts():
         "decisions_by_type": {},
         "window_limit": 500,
     }
+
+
+def test_decisions_are_storable_by_their_own_id():
+    """Regression: MessageStore defaulted to `message_id`, which a Decision
+    does not have. add() raised KeyError, KafkaTopicConsumer classified that
+    as a malformed message and dropped it, and the exception took the rest of
+    handle_alert down with it -- so on a deployed platform no decision was
+    ever stored, published, audited or turned into a notification, and the
+    only trace was a "dropping malformed Kafka message" warning.
+    """
+    store = MessageStore(10, id_field="decision_id")
+    decision = Decision(
+        decision_type="route", alert_id=uuid4(), action="open_incident", reason="first alert"
+    ).model_dump(mode="json")
+
+    assert store.add(decision) is True
+    assert store.add(decision) is False, "the same decision must not be stored twice"
+    assert store.list() == [decision]

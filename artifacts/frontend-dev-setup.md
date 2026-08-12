@@ -67,10 +67,11 @@ Go to **http://localhost:8091** in a browser. You should see the
 Expected, not a bug:
 - The tables show **"Not logged in"** until you actually log in (see
   below) — that's correct, not an error.
-- The **Incidents** tab always shows "Not implemented yet (501)" — that's
-  intentional too. That feature genuinely doesn't exist on the backend
-  yet; the frontend is supposed to say so honestly rather than show a
-  fake empty table.
+- The **Incidents** tab is empty until the correlator actually routes
+  something. An incident is created by a `route` decision, so a quiet
+  window legitimately has none — that is "nothing has paged", not a
+  failure. Alerts that were deduped or suppressed appear on the Алерты and
+  Решения tabs instead, which is where the reason they went nowhere lives.
 
 ### Logging in from here does work — a quick note on why
 
