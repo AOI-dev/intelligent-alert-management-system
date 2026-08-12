@@ -77,7 +77,12 @@ def test_session_cookie_roundtrip():
 
 def test_session_cookie_rejects_tampered_value():
     cookie = issue_session_cookie(uuid4())
-    tampered = cookie[:-1] + ("a" if cookie[-1] != "a" else "b")
+    # Flip a byte inside the payload, not the final signature character: the
+    # signature is unpadded base64url, whose last character carries spare bits
+    # that several distinct characters decode to identically. Tampering there
+    # leaves the signature bytes unchanged often enough to make this test flaky.
+    middle = len(cookie) // 4
+    tampered = cookie[:middle] + ("a" if cookie[middle] != "a" else "b") + cookie[middle + 1 :]
 
     assert read_session_cookie(tampered) is None
 
