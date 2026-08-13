@@ -10,16 +10,20 @@ const API = {
   health: '/health',
 };
 
+// `macket: true` marks a screen rendered from constants in this file rather
+// than from the platform. Those screens already say so in a banner once you
+// open them; the nav badge says it before you click, so a reader is never
+// one click away from mistaking a layout for live data.
 const NAV_ITEMS = [
   { id: 'overview', label: 'Сводка', group: 'УПРАВЛЕНИЕ' },
   { id: 'users', label: 'Пользователи' },
-  { id: 'matrix', label: 'Матрица ответственности' },
+  { id: 'matrix', label: 'Матрица ответственности', macket: true },
   { id: 'systems', label: 'Системы' },
-  { id: 'routing', label: 'Маршрутизация' },
-  { id: 'roles', label: 'Роли и права доступа' },
-  { id: 'sla', label: 'Политики SLA' },
-  { id: 'integrations', label: 'Интеграции' },
-  { id: 'audit', label: 'Аудит' },
+  { id: 'routing', label: 'Маршрутизация', macket: true },
+  { id: 'roles', label: 'Роли и права доступа', macket: true },
+  { id: 'sla', label: 'Политики SLA', macket: true },
+  { id: 'integrations', label: 'Интеграции', macket: true },
+  { id: 'audit', label: 'Аудит', macket: true },
   { id: 'incidents', label: 'Инциденты', group: 'МОНИТОРИНГ' },
   { id: 'alerts', label: 'Алерты' },
   { id: 'events', label: 'События' },
@@ -149,7 +153,7 @@ function renderNav() {
   const items = NAV_ITEMS;
   if (!items.some((item) => item.id === state.currentView) && !DETAIL_VIEWS.includes(state.currentView)) state.currentView = 'overview';
   const activeView = state.currentView === 'profile' ? 'users' : state.currentView === 'role-editor' ? 'roles' : state.currentView;
-  nav.innerHTML = items.map((item) => `${item.group ? `<div class="nav-section">${escapeHtml(item.group)}</div>` : ''}<button class="nav-button ${item.id === activeView ? 'active' : ''}" data-view="${item.id}" type="button">${escapeHtml(item.label)}</button>`).join('');
+  nav.innerHTML = items.map((item) => `${item.group ? `<div class="nav-section">${escapeHtml(item.group)}</div>` : ''}<button class="nav-button ${item.id === activeView ? 'active' : ''}" data-view="${item.id}" type="button">${escapeHtml(item.label)}${item.macket ? '<span class="nav-tag">макет</span>' : ''}</button>`).join('');
   nav.querySelectorAll('.nav-button').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.view)));
   document.getElementById('nav-eyebrow').textContent = 'INCIDENT INTELLIGENCE';
 }
@@ -487,11 +491,16 @@ function renderSla() {
 }
 
 function renderIntegrations() {
-  const integrations = [['Zabbix', 'Мониторинг', 'Подключено', 'сейчас'], ['SolarWinds', 'Мониторинг', 'Отключено', '—'], ['TrueConf', 'Идентификация', 'Требует настройки', '—'], ['LDAP / AD', 'Каталог пользователей', 'Демо-контур', '5 мин'], ['CMDB', 'Каталог систем', 'Демо-контур', '12 мин']];
+  // Statuses are macket values, and this screen used to claim Zabbix was
+  // "Подключено · сейчас · Успешно" while its API reconciliation was in fact
+  // failing every cycle. A mockup asserting a false *live* status is worse
+  // than an obvious placeholder: it is the one thing a reader would take at
+  // face value. Until this reads /v1/contours, every status says so.
+  const integrations = [['Zabbix', 'Мониторинг', 'В разработке', '—'], ['SolarWinds', 'Мониторинг', 'Отключено', '—'], ['TrueConf', 'Идентификация', 'В разработке', '—'], ['LDAP / AD', 'Каталог пользователей', 'Демо-контур', '—'], ['CMDB', 'Каталог систем', 'Демо-контур', '—']];
   content.innerHTML = page('Интеграции', 'Источники мониторинга, идентификация и синхронизация справочников', `
-    ${designBanner('Статус Zabbix и платформы проверяется backend. Остальные подключения показаны по макету до ввода учетных данных.')}
+    ${designBanner('Экран собран по макету: состояния подключений здесь не читаются с backend. Фактическое состояние контуров платформы — на странице «Системы», она берёт его из /v1/contours.')}
     <article class="card table-card"><div class="table-heading"><h2>Подключения</h2>${protectedButton('Добавить интеграцию')}</div><div class="table-scroll"><table><thead><tr><th>Интеграция</th><th>Назначение</th><th>Состояние</th><th>Последняя синхронизация</th><th>Действия</th></tr></thead><tbody>${integrations.map((item, index) => `<tr><td class="cell-title">${item[0]}</td><td>${item[1]}</td><td>${badge(index === 0 ? 'healthy' : index === 2 ? 'warning' : 'info', item[2])}</td><td>${item[3]}</td><td>${protectedButton(index === 0 ? 'Обновить' : 'Открыть', true)}</td></tr>`).join('')}</tbody></table></div></article>
-    <article class="card integration-detail"><div><h2>Zabbix</h2><p>Основной источник событий и проблем мониторинга.</p></div><dl class="detail-list horizontal"><div><dt>Endpoint</dt><dd class="mono">/api_jsonrpc.php</dd></div><div><dt>Синхронизация</dt><dd>каждые 60 секунд</dd></div><div><dt>Последний результат</dt><dd>${badge('healthy', 'Успешно')}</dd></div></dl></article>
+    <article class="card integration-detail"><div><h2>Zabbix</h2><p>Основной источник событий и проблем мониторинга.</p></div><dl class="detail-list horizontal"><div><dt>Endpoint</dt><dd class="mono">/api_jsonrpc.php</dd></div><div><dt>Синхронизация</dt><dd>каждые 60 секунд</dd></div><div><dt>Последний результат</dt><dd>${badge('warning', 'Не отображается')}</dd></div></dl></article>
   `);
 }
 

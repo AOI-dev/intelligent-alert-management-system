@@ -1,4 +1,5 @@
 groups:
+  # Alerts about the pilot's own components.
   - name: platform-integration
     rules:
       - alert: EventsimUnavailable
@@ -10,11 +11,74 @@ groups:
           summary: "Event simulation server is unavailable"
           runbook: "Check the eventsim-server container and its Kafka connection."
 
-      - alert: EventsimAlertRateHigh
-        expr: increase(eventsim_alerts_total[5m]) > 10
-        for: 2m
+      - alert: PlatformUnavailable
+        expr: up{job="platform"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alert platform is unavailable"
+          runbook: "Check monitoring-platform; alert ingestion stops while it is down."
+
+      - alert: NotificationsUnavailable
+        expr: up{job="notifications"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Notification dispatcher is unavailable"
+          runbook: "Check notifications-server; routed alerts reach nobody while it is down."
+
+  # Alerts about the *simulated infrastructure*, evaluated here rather than
+  # inside the simulator.
+  #
+  # These thresholds deliberately mirror eventsim/app/rules.py. The point is
+  # not to move the logic but to move the decision: with
+  # EVENTSIM_PUBLISH_ALERTS=false, the simulator only reports readings and
+  # Prometheus is what decides an alert has occurred -- so the alert reaches
+  # the platform through Alertmanager and the same webhook adapter a real
+  # Prometheus deployment would use, instead of being injected straight onto
+  # the Kafka topic. That path was fully built and had never once been
+  # exercised (platform_webhooks_total had no samples at all).
+  #
+  # `service` is carried from the scraped series into the alert labels
+  # because the platform routes on it (app/core/pipeline.py:default_key and
+  # platform/config/routing.json). An alert without it is unroutable and
+  # pages nobody.
+  - name: simulated-infrastructure
+    rules:
+      - alert: HighCpu
+        expr: eventsim_observation{metric="cpu_percent"} > 90
+        for: 30s
+        labels:
+          severity: critical
+          service: "{{ $labels.service }}"
+          host: "{{ $labels.source }}"
+        annotations:
+          summary: "CPU above 90% on {{ $labels.source }} ({{ $labels.service }})"
+          description: "cpu_percent = {{ $value | printf \"%.1f\" }} on {{ $labels.source }}."
+          runbook: "Check load on the host, then the service's recent deploys."
+
+      - alert: LowDisk
+        expr: eventsim_observation{metric="disk_free_percent"} < 10
+        for: 30s
         labels:
           severity: warning
+          service: "{{ $labels.service }}"
+          host: "{{ $labels.source }}"
         annotations:
-          summary: "Event simulator is producing an elevated alert rate"
-          runbook: "Inspect the platform alert landing page and source metrics."
+          summary: "Free disk below 10% on {{ $labels.source }} ({{ $labels.service }})"
+          description: "disk_free_percent = {{ $value | printf \"%.1f\" }} on {{ $labels.source }}."
+          runbook: "Rotate or ship logs; check for a runaway writer."
+
+      - alert: HighLatency
+        expr: eventsim_observation{metric="latency_ms"} > 500
+        for: 30s
+        labels:
+          severity: warning
+          service: "{{ $labels.service }}"
+          host: "{{ $labels.source }}"
+        annotations:
+          summary: "Latency above 500ms on {{ $labels.source }} ({{ $labels.service }})"
+          description: "latency_ms = {{ $value | printf \"%.0f\" }} on {{ $labels.source }}."
+          runbook: "Check upstream dependencies and connection pools."

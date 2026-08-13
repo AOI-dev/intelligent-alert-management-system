@@ -3,7 +3,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from prometheus_client import Counter
+from prometheus_client import Counter, Gauge
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.kafka_producer import MonitoringProducer
@@ -17,9 +17,30 @@ EVENTS_TOPIC = os.environ.get("KAFKA_EVENTS_TOPIC", "monitoring.events.v1")
 ALERTS_TOPIC = os.environ.get("KAFKA_ALERTS_TOPIC", "monitoring.alerts.v1")
 AUTOGENERATE = os.environ.get("EVENTSIM_AUTOGENERATE", "false").lower() == "true"
 AUTOGENERATE_INTERVAL = float(os.environ.get("EVENTSIM_AUTOGENERATE_INTERVAL", "10"))
+# Whether a breached threshold is published straight to the alerts topic.
+#
+# Off means this simulator stops acting as its own monitoring system and goes
+# back to being what it simulates: a source of *readings*. The readings are
+# exposed for scraping (see `observation` below), Prometheus evaluates them
+# against its own rules, Alertmanager posts the result to the platform's
+# /v1/integrations/alertmanager/webhook, and the alert reaches the pipeline
+# through the same adapter a real Prometheus would use. Events still go to
+# the events topic either way -- those are observations, not alerts.
+#
+# Left on, both paths run and every breach is delivered twice: once directly,
+# once round the loop. Useful for comparing them, wrong for a demo.
+PUBLISH_ALERTS = os.environ.get("EVENTSIM_PUBLISH_ALERTS", "true").lower() == "true"
 
 events_total = Counter("eventsim_events_total", "Synthetic events ingested")
 alerts_total = Counter("eventsim_alerts_total", "Alerts fired, by rule", ["rule", "severity"])
+# The simulated readings themselves, for Prometheus to scrape and alert on.
+# A Gauge, not a Counter: this is the current value of a metric on a host,
+# which is exactly what a monitoring agent would report.
+observation = Gauge(
+    "eventsim_observation",
+    "Latest simulated reading, by source and metric",
+    ["source", "metric", "service"],
+)
 
 # Constructed in lifespan(), not here: aiokafka's AIOKafkaProducer requires a
 # running event loop as of aiokafka 0.11, so building it at import time
@@ -74,9 +95,17 @@ async def ingest(event: EventIn) -> list[Alert]:
             data=event.model_dump(mode="json"),
         ),
     )
+    observation.labels(
+        source=event.source,
+        metric=event.metric,
+        service=event.labels.get("service", "unknown"),
+    ).set(event.value)
+
     fired = evaluate(event)
     for alert in fired:
         alerts_total.labels(rule=alert.rule, severity=alert.severity).inc()
+        if not PUBLISH_ALERTS:
+            continue
         await producer.publish(
             ALERTS_TOPIC,
             MessageEnvelope(
