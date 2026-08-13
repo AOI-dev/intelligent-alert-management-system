@@ -35,6 +35,18 @@ logger = logging.getLogger(__name__)
 
 TRUECONF_SERVER = os.environ.get("TRUECONF_SERVER", "")
 TRUECONF_BOT_TOKEN = os.environ.get("TRUECONF_BOT_TOKEN", "")
+# How to reach the server, which is not the library's default on this pilot.
+# python-trueconf-bot defaults to https on 443; the deployed TrueConf Server
+# publishes 443 but serves no TLS on it (`curl https://host:443/` fails to
+# connect, `http://host:80/` answers 200) -- HTTPS is terminated by the
+# separate trueconf-tls proxy on 8443 with a self-signed certificate. Left at
+# the library defaults, every send fails at the transport before the token is
+# ever checked, which looks exactly like a bad token.
+TRUECONF_HTTPS = os.environ.get("TRUECONF_HTTPS", "false").lower() == "true"
+TRUECONF_WEB_PORT = int(os.environ.get("TRUECONF_WEB_PORT", "80"))
+# Only meaningful when TRUECONF_HTTPS is true: the proxy's certificate is
+# self-signed, the same reason platform/flags.env sets TRUECONF_VERIFY_SSL.
+TRUECONF_VERIFY_SSL = os.environ.get("TRUECONF_VERIFY_SSL", "false").lower() == "true"
 
 router = Router()
 dp = Dispatcher()
@@ -42,7 +54,14 @@ dp.include_router(router)
 
 bot: Bot | None = None
 if TRUECONF_SERVER and TRUECONF_BOT_TOKEN:
-    bot = Bot(server=TRUECONF_SERVER, token=TRUECONF_BOT_TOKEN, dispatcher=dp)
+    bot = Bot(
+        server=TRUECONF_SERVER,
+        token=TRUECONF_BOT_TOKEN,
+        dispatcher=dp,
+        https=TRUECONF_HTTPS,
+        web_port=TRUECONF_WEB_PORT,
+        verify_ssl=TRUECONF_VERIFY_SSL,
+    )
 else:
     logger.warning(
         "TRUECONF_SERVER/TRUECONF_BOT_TOKEN not set; HTTP API will start but "
@@ -111,6 +130,10 @@ async def health() -> dict:
     return {
         "status": "ok",
         "server": TRUECONF_SERVER or "unset",
+        # Reported because a wrong transport fails identically to a wrong
+        # token from the caller's side, and this is the cheapest way to tell
+        # the two apart without reading container env.
+        "transport": f"{'https' if TRUECONF_HTTPS else 'http'}://{TRUECONF_SERVER}:{TRUECONF_WEB_PORT}",
         "bot": "configured" if bot is not None else "unavailable: no TRUECONF_BOT_TOKEN",
     }
 

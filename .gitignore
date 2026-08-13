@@ -15,3 +15,4 @@ scenario/corpus.json
 
 # Routing config names real people and real endpoints; see routing.example.json.
 platform/routing.json
+platform/config/routing.json

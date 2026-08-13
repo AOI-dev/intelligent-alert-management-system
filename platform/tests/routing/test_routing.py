@@ -184,14 +184,20 @@ def test_heuristic_priority_defaults_for_unknown_severity():
 
 @pytest.mark.asyncio
 async def test_route_decision_becomes_a_notification_request():
+    # `checkout` -> payments, a team with no `shifts`, so this asserts the
+    # decision-to-request conversion and nothing else. Routing it through
+    # platform_infra instead made the expected recipient depend on the wall
+    # clock -- it passed during alice's 08:00-20:00 shift and failed all
+    # night. The rota itself is covered by the tests that pass an explicit
+    # `at` to RoutingRegistry.resolve.
     router = NotificationRouter(RoutingRegistry(CONFIG), NotificationSummarizer(client=StubClient(error=AIClientError("down"))))
-    request = await router.build(_route(), _alert())
+    request = await router.build(_route(), _alert(labels={"service": "checkout"}))
 
     assert request is not None
-    assert request.target_id == "alice"
+    assert request.target_id == "carmen"
     assert request.webhook_url == "http://bot/v1/notify"
     # What trueconf-bot needs, and nothing it must guess at.
-    assert request.payload["trueconf_id"] == "alice@tc"
+    assert request.payload["trueconf_id"] == "carmen@tc"
     assert "high_cpu" in request.payload["text"]
     assert request.payload["summary_source"] == "heuristic"
 

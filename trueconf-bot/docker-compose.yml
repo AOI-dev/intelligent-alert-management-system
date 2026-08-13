@@ -18,6 +18,9 @@ services:
       # needs a human in the TrueConf control panel, so the rest of the chain
       # has to be deployable before this exists.
       TRUECONF_BOT_TOKEN: ${TRUECONF_BOT_TOKEN:-}
+      TRUECONF_HTTPS: ${TRUECONF_HTTPS:-false}
+      TRUECONF_WEB_PORT: ${TRUECONF_WEB_PORT:-80}
+      TRUECONF_VERIFY_SSL: ${TRUECONF_VERIFY_SSL:-false}
     networks:
       - trueconf-bot
 

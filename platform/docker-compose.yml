@@ -41,6 +41,19 @@ services:
       VLLM_MODEL: ${VLLM_MODEL:-}
       AI_ENRICHMENT_MODE: ${AI_ENRICHMENT_MODE:-off}
       AI_ENRICHMENT_TIMEOUT_SECONDS: ${AI_ENRICHMENT_TIMEOUT_SECONDS:-30}
+      NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-false}
+      NOTIFICATION_CONCURRENCY: ${NOTIFICATION_CONCURRENCY:-4}
+      ROUTING_CONFIG_PATH: ${ROUTING_CONFIG_PATH:-/etc/platform/routing.json}
+    volumes:
+      # routing.json is gitignored (it names real people) and the Dockerfile
+      # only COPYs app/, so without this mount the file is unreachable from
+      # inside the container no matter where it sits on the host -- the
+      # deployed platform logged "Routing config routing.json not found" and
+      # notified nobody. Mounting the directory rather than the file means a
+      # missing routing.json stays a missing *file* (RoutingRegistry degrades
+      # to "nobody is notified", as designed); bind-mounting a file that does
+      # not exist would have Docker silently create a directory in its place.
+      - ./config:/etc/platform:ro
     ports:
       - "${PLATFORM_PORT:-8100}:8100"
     networks: [eventsim, prometheus, zabbix, timescaledb, platform]
