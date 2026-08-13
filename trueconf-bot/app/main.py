@@ -47,25 +47,54 @@ TRUECONF_WEB_PORT = int(os.environ.get("TRUECONF_WEB_PORT", "80"))
 # Only meaningful when TRUECONF_HTTPS is true: the proxy's certificate is
 # self-signed, the same reason platform/flags.env sets TRUECONF_VERIFY_SSL.
 TRUECONF_VERIFY_SSL = os.environ.get("TRUECONF_VERIFY_SSL", "false").lower() == "true"
+# Fallback identity: an ordinary TrueConf account the adapter logs in as,
+# used when no bot token is configured.
+#
+# A registered chat bot is the right way to do this, but it is not available
+# on every server. This one runs 5.5.5, whose Chatbot API answers
+# (/api/v4/server and /api/v4/endpoints/connects both 200), yet whose control
+# panel ships no chat-bot section at all -- "chatbot" does not appear once in
+# the admin-area or user-area bundles, only in the API docs. With no way to
+# mint a token, token-only auth would leave delivery permanently unreachable
+# on this deployment.
+#
+# The trade is real and worth stating: messages then arrive from a person's
+# account rather than an identifiable bot, and that account's password lives
+# in this stack's .env. Prefer TRUECONF_BOT_TOKEN wherever a bot can actually
+# be registered; this is the pilot's way around a missing panel feature, not
+# the better design.
+TRUECONF_BOT_USERNAME = os.environ.get("TRUECONF_BOT_USERNAME", "")
+TRUECONF_BOT_PASSWORD = os.environ.get("TRUECONF_BOT_PASSWORD", "")
 
 router = Router()
 dp = Dispatcher()
 dp.include_router(router)
 
+_TRANSPORT = {
+    "https": TRUECONF_HTTPS,
+    "web_port": TRUECONF_WEB_PORT,
+    "verify_ssl": TRUECONF_VERIFY_SSL,
+}
+
 bot: Bot | None = None
+auth_mode = "unavailable: no TRUECONF_BOT_TOKEN and no TRUECONF_BOT_USERNAME/PASSWORD"
 if TRUECONF_SERVER and TRUECONF_BOT_TOKEN:
-    bot = Bot(
+    bot = Bot(server=TRUECONF_SERVER, token=TRUECONF_BOT_TOKEN, dispatcher=dp, **_TRANSPORT)
+    auth_mode = "token"
+elif TRUECONF_SERVER and TRUECONF_BOT_USERNAME and TRUECONF_BOT_PASSWORD:
+    bot = Bot.from_credentials(
         server=TRUECONF_SERVER,
-        token=TRUECONF_BOT_TOKEN,
+        username=TRUECONF_BOT_USERNAME,
+        password=TRUECONF_BOT_PASSWORD,
         dispatcher=dp,
-        https=TRUECONF_HTTPS,
-        web_port=TRUECONF_WEB_PORT,
-        verify_ssl=TRUECONF_VERIFY_SSL,
+        **_TRANSPORT,
     )
+    auth_mode = f"credentials ({TRUECONF_BOT_USERNAME})"
 else:
     logger.warning(
-        "TRUECONF_SERVER/TRUECONF_BOT_TOKEN not set; HTTP API will start but "
-        "message delivery is disabled until a bot token is configured"
+        "No TrueConf credentials configured (TRUECONF_BOT_TOKEN, or "
+        "TRUECONF_BOT_USERNAME + TRUECONF_BOT_PASSWORD); HTTP API will start "
+        "but /v1/notify will answer 503"
     )
 
 
@@ -134,7 +163,11 @@ async def health() -> dict:
         # token from the caller's side, and this is the cheapest way to tell
         # the two apart without reading container env.
         "transport": f"{'https' if TRUECONF_HTTPS else 'http'}://{TRUECONF_SERVER}:{TRUECONF_WEB_PORT}",
-        "bot": "configured" if bot is not None else "unavailable: no TRUECONF_BOT_TOKEN",
+        "bot": "configured" if bot is not None else auth_mode,
+        # Which identity messages are sent as. Never the password itself --
+        # only whether a token or an account is doing the sending, and which
+        # account, both of which are already visible to every recipient.
+        "auth": auth_mode,
     }
 
 
