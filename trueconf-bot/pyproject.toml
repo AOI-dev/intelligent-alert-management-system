@@ -9,4 +9,8 @@ dependencies = [
     # rather than a second Kafka consumer.
     "fastapi>=0.110",
     "uvicorn>=0.27",
+    # Used directly for the credentials token fetch in app/main.py. It already
+    # arrives via python-trueconf-bot, but declaring it makes that an
+    # intentional dependency rather than one this code happens to inherit.
+    "httpx>=0.27",
 ]

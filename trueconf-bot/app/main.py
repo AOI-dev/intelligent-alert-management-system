@@ -27,6 +27,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from trueconf import Bot, Dispatcher, F, Message, ParseMode, Router
@@ -76,20 +77,68 @@ _TRANSPORT = {
     "verify_ssl": TRUECONF_VERIFY_SSL,
 }
 
+
+def _fetch_access_token() -> str:
+    """Exchange the configured account's credentials for a chatbot token.
+
+    Done here rather than through Bot.from_credentials, which cannot work on
+    this server: it passes neither `https` nor `web_port` down to its token
+    fetch (trueconf/utils/_token.py defaults them to https/443), so it always
+    posts to https://<server>:443 no matter what transport the Bot is given.
+    This server serves no TLS on 443, so that call fails with a connection
+    refusal that looks like a credentials problem and is not one.
+
+    The token is fetched once at startup and carries an expiry (~30 days on
+    this server). Long enough for the pilot; a long-lived deployment wants a
+    refresh before that, which is a reason to prefer a real bot token.
+    """
+    scheme = "https" if TRUECONF_HTTPS else "http"
+    url = f"{scheme}://{TRUECONF_SERVER}:{TRUECONF_WEB_PORT}/bridge/api/client/v1/oauth/token"
+    response = httpx.post(
+        url,
+        json={
+            # The server ties this grant to the chat-bot client; a regular
+            # user login uses a different client_id and yields a token the
+            # Chatbot API rejects.
+            "client_id": "chat_bot",
+            "grant_type": "password",
+            "username": TRUECONF_BOT_USERNAME,
+            "password": TRUECONF_BOT_PASSWORD,
+        },
+        timeout=10.0,
+        verify=TRUECONF_VERIFY_SSL,
+    )
+    response.raise_for_status()
+    token = response.json().get("access_token")
+    if not token:
+        raise RuntimeError("TrueConf returned no access_token")
+    return token
+
+
 bot: Bot | None = None
 auth_mode = "unavailable: no TRUECONF_BOT_TOKEN and no TRUECONF_BOT_USERNAME/PASSWORD"
 if TRUECONF_SERVER and TRUECONF_BOT_TOKEN:
     bot = Bot(server=TRUECONF_SERVER, token=TRUECONF_BOT_TOKEN, dispatcher=dp, **_TRANSPORT)
     auth_mode = "token"
 elif TRUECONF_SERVER and TRUECONF_BOT_USERNAME and TRUECONF_BOT_PASSWORD:
-    bot = Bot.from_credentials(
-        server=TRUECONF_SERVER,
-        username=TRUECONF_BOT_USERNAME,
-        password=TRUECONF_BOT_PASSWORD,
-        dispatcher=dp,
-        **_TRANSPORT,
-    )
-    auth_mode = f"credentials ({TRUECONF_BOT_USERNAME})"
+    # from_credentials() authenticates over the network *during construction*,
+    # unlike token auth which just stores the token. An unreachable or
+    # unhappy server therefore raises here, at import -- and an exception at
+    # import kills the process, which `restart: unless-stopped` turns into a
+    # crash loop that takes the HTTP API down with it. That is the one
+    # behaviour this adapter is documented not to have: the API stays up and
+    # answers 503 so the failure is legible from outside.
+    try:
+        bot = Bot(server=TRUECONF_SERVER, token=_fetch_access_token(), dispatcher=dp, **_TRANSPORT)
+        auth_mode = f"credentials ({TRUECONF_BOT_USERNAME})"
+    except Exception as error:
+        # Deliberately broad: any failure to log in must degrade to 503, and
+        # the library raises httpx errors, its own auth errors and ValueError
+        # for different causes. The message carries the cause so /health says
+        # which -- unreachable server and wrong password look identical
+        # otherwise.
+        logger.warning("TrueConf login as %r failed: %s", TRUECONF_BOT_USERNAME, error)
+        auth_mode = f"unavailable: login as {TRUECONF_BOT_USERNAME} failed ({type(error).__name__})"
 else:
     logger.warning(
         "No TrueConf credentials configured (TRUECONF_BOT_TOKEN, or "
