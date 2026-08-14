@@ -1,0 +1,39 @@
+\documentclass[border=6pt]{standalone}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{tikz}
+\usetikzlibrary{arrows, positioning, shadows, automata, arrows.meta, fit}
+\begin{document}
+\begin{tikzpicture}[
+        stage/.style={rectangle, draw, fill=blue!10, text width=2.7cm, text centered, minimum height=1.1cm, rounded corners, font=\small},
+        dec/.style={rectangle, draw, fill=orange!15, text width=2.7cm, text centered, minimum height=1.1cm, rounded corners, font=\small},
+        opt/.style={rectangle, draw, fill=green!12, text width=2.7cm, text centered, minimum height=1.1cm, rounded corners, font=\small},
+        todo/.style={rectangle, draw, dashed, fill=white, text width=2.7cm, text centered, minimum height=1.1cm, rounded corners, font=\small},
+        arrow/.style={-{Stealth[length=3mm]}, thick, font=\footnotesize},
+        aiflow/.style={-{Stealth[length=3mm]}, thick, dashed, font=\footnotesize}
+    ]
+        \node[stage] (in) {Приём и нормализация};
+        \node[stage, right=1.2cm of in] (win) {Окно ключа корреляции};
+        \node[dec, right=1.2cm of win] (aut) {Автомат: dedup / suppress / route};
+        \node[stage, right=1.2cm of aut] (who) {Определение получателя};
+        \node[stage, right=1.2cm of who] (send) {Доставка и статус};
+
+        \node[opt, below=1.2cm of aut] (enrich) {Обогащение: класс, приоритет};
+        \node[opt, below=1.2cm of who] (text) {Формулировка текста};
+        \node[stage, below=1.2cm of send, fill=gray!15] (fb) {Fallback: форматирование полей};
+
+        \draw[arrow] (in) -- (win);
+        \draw[arrow] (win) -- (aut);
+        \draw[arrow] (aut) -- node[above] {route} (who);
+        \draw[arrow] (who) -- (send);
+        \draw[aiflow] (aut) -- (enrich);
+        \draw[aiflow] (who) -- (text);
+        \draw[aiflow] (text) -- node[above] {отказ} (fb);
+        \draw[aiflow] (fb) -- (send);
+        \node[opt, right=1.2cm of send] (ack) {Карточка инцидента и подтверждение};
+        \draw[arrow] (send) -- (ack);
+
+        \node[draw, rounded corners, below=1.0cm of enrich, text width=8.2cm, font=\footnotesize, align=left]
+            {\textbf{Обозначения:} сплошная рамка~--- реализовано; штриховая~--- целевая архитектура. Штриховая стрелка от ядра к ИИ~--- асинхронный (отделённый) вызов};
+    \end{tikzpicture}
+\end{document}

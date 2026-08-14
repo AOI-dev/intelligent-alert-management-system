@@ -1,0 +1,55 @@
+\documentclass[border=6pt]{standalone}
+\input{c4style}
+
+\begin{document}
+\begin{tikzpicture}[
+    font=\normalsize,
+    comp/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4component, text=white,
+                 text width=4.0cm, align=center, inner sep=6pt, minimum height=1.9cm},
+    plan/.style={rectangle, rounded corners=4pt, draw=black!45, very thick, dashed, fill=c4component, text=white,
+                 text width=4.0cm, align=center, inner sep=6pt, minimum height=1.9cm},
+    cont/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4container, text=white,
+                 text width=3.4cm, align=center, inner sep=6pt, minimum height=1.5cm},
+    store/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4store, text=white,
+                  text width=3.4cm, align=center, inner sep=6pt, minimum height=1.5cm},
+    rel/.style={-{Stealth[length=3mm]}, thick, black!55, font=\small},
+]
+
+% --- соседние контейнеры ---
+\node[cont]  (kafka) at (0,3.4)   {\ttl{Шина сообщений}\\[3pt] \typ{Kafka}};
+\node[cont]  (ai)    at (0,-5.0)  {\ttl{ИИ-обработчик}\\[3pt] \typ{vLLM}};
+\node[store] (cache) at (15.6,3.4){\ttl{Кэш живого хвоста}\\[3pt] \typ{in-memory}};
+\node[store] (db)    at (15.6,-2.0){\ttl{Проекция истории}\\[3pt] \typ{TimescaleDB}};
+
+% --- компоненты монолита ---
+\node[comp] (ingest) at (5.4,3.4)  {\ttl{Приём и нормализация}\\[3pt] Адаптеры источников};
+\node[comp] (filter) at (5.4,0.8)  {\ttl{Фильтрация}\\[3pt] Политики отбора};
+\node[comp] (corr)   at (5.4,-1.8) {\ttl{Корреляция}\\[3pt] Окно ключа, автомат};
+\node[comp] (route)  at (5.4,-4.4) {\ttl{Маршрутизация}\\[3pt] Реестр дежурных};
+
+\node[comp] (api)    at (10.6,3.4) {\ttl{API запросов}\\[3pt] События и решения};
+\node[comp] (ident)  at (10.6,0.8) {\ttl{Идентификация}\\[3pt] OAuth~2 и роли};
+\node[comp] (aisvc)  at (10.6,-1.8){\ttl{Клиент ИИ}\\[3pt] Единственный стык, fallback};
+\node[comp] (inc)    at (10.6,-4.4){\ttl{Инциденты}\\[3pt] Карточка и обратная связь};
+
+\node[draw, dashed, black!55, thick, rounded corners, inner sep=0.5cm,
+      fit=(ingest)(route)(api)(inc),
+      label={[anchor=north west, font=\bfseries]north west:Платформа [Python, FastAPI]}] {};
+
+% --- связи ---
+\draw[rel] (kafka) -- node[above] {алерты} (ingest);
+\draw[rel] (ingest) -- (filter);
+\draw[rel] (filter) -- (corr);
+\draw[rel] (corr) -- (route);
+\draw[rel] (corr.south east) to[out=-25,in=190] node[below, sloped, pos=0.7] {запись} (db.west);
+\draw[rel] (api.east) -- node[above] {чтение} (cache.west);
+\draw[rel] (corr) -- node[above] {запрос} (aisvc);
+\draw[rel] (aisvc.south) to[out=-90,in=-20] node[below, sloped, pos=0.85] {HTTP} (ai.east);
+\draw[rel] (ident) -- node[above] {сессия} (api);
+\draw[rel] (inc) -- (route);
+
+\node[anchor=north west, align=left, font=\small] at (-2.0,-7.0)
+    {\textbf{C4, уровень 3: Components} (контейнер «Платформа»). Штриховая рамка~--- целевая архитектура.};
+
+\end{tikzpicture}
+\end{document}

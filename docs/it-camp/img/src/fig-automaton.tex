@@ -1,0 +1,26 @@
+\documentclass[border=6pt]{standalone}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{tikz}
+\usetikzlibrary{arrows, positioning, shadows, automata, arrows.meta, fit}
+\begin{document}
+\begin{tikzpicture}[
+        state/.style={rectangle, draw, fill=blue!10, text width=2.6cm, text centered, minimum height=1cm, rounded corners},
+        arrow/.style={-{Stealth[length=3mm]}, thick},
+        esc/.style={-{Stealth[length=3mm]}, thick, red!55!black},
+    ]
+        \node[state] (new) {NEW};
+        \node[state, right=3cm of new] (open) {OPEN};
+        \node[state, right=3cm of open] (flap) {FLAPPING};
+
+        \draw[arrow] (new) -- node[above, font=\small] {первый алерт} node[below, font=\small] {(route)} (open);
+        \draw[arrow] (open) -- node[above, font=\small] {снижение severity} node[below, font=\small] {(suppress)} (flap);
+        \draw[arrow] (open) to[loop above] node[above, font=\small] {повтор (dedup)/малая эскалация} (open);
+        \draw[arrow] (flap) to[loop below] node[below, font=\small] {всё прочее (suppress)} (flap);
+        \draw[esc] (flap) to[bend left=35] node[above, font=\small, text=red!55!black] {рост выше пика до high/critical (route)} (open);
+
+        \node[font=\footnotesize, anchor=north west, align=left, text=red!55!black] at (-1.2,-2.0)
+            {Красным~--- правило эскалации: рост критичности ключа выше его прежнего\\
+             пика в окне всегда порождает route, в том числе из FLAPPING (ФТ7.1, ФТ7.2).};
+    \end{tikzpicture}
+\end{document}

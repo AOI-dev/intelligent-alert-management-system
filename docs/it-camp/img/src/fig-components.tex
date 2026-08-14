@@ -1,0 +1,54 @@
+\documentclass[border=6pt]{standalone}
+\input{c4style}
+
+\begin{document}
+\begin{tikzpicture}[
+    font=\normalsize,
+    person/.style={rectangle, rounded corners=8pt, draw=black!45, thick, fill=c4person, text=white,
+                   text width=3.6cm, align=center, inner sep=6pt, minimum height=1.5cm},
+    cont/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4container, text=white,
+                 text width=3.8cm, align=center, inner sep=6pt, minimum height=2.0cm},
+    plan/.style={rectangle, rounded corners=4pt, draw=black!45, very thick, dashed, fill=c4container, text=white,
+                 text width=3.8cm, align=center, inner sep=6pt, minimum height=2.0cm},
+    store/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4store, text=white,
+                  text width=3.8cm, align=center, inner sep=6pt, minimum height=1.8cm},
+    ext/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4ext, text=white,
+                text width=3.4cm, align=center, inner sep=6pt, minimum height=1.5cm},
+    rel/.style={-{Stealth[length=3mm]}, thick, black!55, font=\small},
+]
+
+% --- внешние источники и пользователи ---
+\node[ext]                       (mon)  at (0,1.7)  {\ttl{Системы мониторинга}\\[3pt] \typ{External}};
+\node[ext]                       (sim)  at (0,-1.7) {\ttl{Генератор событий}\\[3pt] \typ{External, стенд}};
+\node[person]                    (user) at (0,5.4)  {\ttl{Инженер и администратор}\\[3pt] \typ{Person}};
+
+% --- контейнеры ---
+\node[plan]  (conn)  at (5.6,0)    {\ttl{Клиент-коннектор}\\[3pt] \typ{Python, FastAPI}\\[3pt] Нормализация событий};
+\node[cont]  (kafka) at (11.2,0)   {\ttl{Шина сообщений}\\[3pt] \typ{Apache Kafka}\\[3pt] Топики v1};
+\node[cont]  (core)  at (16.8,0)   {\ttl{Платформа}\\[3pt] \typ{Python, FastAPI}\\[3pt] Корреляция и API};
+\node[cont]  (disp)  at (22.4,0)   {\ttl{Диспетчер уведомлений}\\[3pt] \typ{Python}\\[3pt] Доставка и статус};
+\node[cont]  (bot)   at (28.0,0)   {\ttl{Бот TrueConf}\\[3pt] \typ{Python}\\[3pt] Адаптер канала};
+\node[ext]   (tc)    at (33.2,0)   {\ttl{TrueConf Server}\\[3pt] \typ{External}};
+
+\node[cont]  (web)   at (16.8,5.4) {\ttl{Веб-интерфейс}\\[3pt] \typ{HTML/JS, nginx}\\[3pt] Дашборд и кабинет};
+\node[store] (db)    at (11.2,-5.4){\ttl{Хранилище}\\[3pt] \typ{TimescaleDB}\\[3pt] История и аудит};
+\node[cont]  (ai)    at (16.8,-5.4){\ttl{ИИ-обработчик}\\[3pt] \typ{vLLM, Qwen}\\[3pt] Обогащение текста};
+
+% --- связи ---
+\draw[rel] (mon)  -- node[above, sloped] {webhook, API} (conn);
+\draw[rel] (sim)  -- node[below, sloped] {события} (conn);
+\draw[rel, dashed] (conn) -- node[above] {единая схема} (kafka);
+\draw[rel] (kafka) -- node[above] {потребление} (core);
+\draw[rel] (core)  -- node[above] {запрос} (disp);
+\draw[rel] (disp)  -- node[above] {webhook} (bot);
+\draw[rel] (bot)   -- node[above] {чат} (tc);
+\draw[rel] (user)  -- node[above, sloped] {HTTPS} (web);
+\draw[rel] (web)   -- node[right] {REST} (core);
+\draw[rel] (core)  -- node[right] {асинхронно} (ai);
+\draw[rel] (core)  -- node[above, sloped] {запись} (db);
+
+\node[anchor=north west, align=left, font=\small] at (-2.2,-7.6)
+    {\textbf{C4, уровень 2: Containers.} Штриховая рамка~--- целевая архитектура: на пилоте адаптеры выполняются внутри платформы.};
+
+\end{tikzpicture}
+\end{document}

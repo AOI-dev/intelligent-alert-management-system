@@ -1,0 +1,15 @@
+% Любимые команды
+\newcommand{\Code}[1]{\textbf{#1}}
+
+% --- Кросс-ссылки на требования и архитектурные решения ---
+% \reqBT{7.1} -> «ФТ7.1» со ссылкой на таблицу требований БТ7;
+% \reqAR{01}  -> «АР-01» со ссылкой на матрицу трассировки в приложении.
+% Ссылка ведёт на таблицу, где сокращение расшифровано.
+\newcommand{\reqAR}[1]{\hyperref[tab:traceability]{АР-#1}}
+\newcommand{\reqPT}[1]{\hyperref[tab:ai-requirements]{ПТ#1}}
+\newcommand{\reqFT}[1]{\hyperref[tab:ai-requirements]{ФТ#1}}
+\newcommand{\reqNFT}[1]{\hyperref[tab:ai-requirements]{НФТ#1}}
+\newcommand{\reqBT}[1]{\hyperref[tab:traceability]{БТ-#1}}
+
+% Сокращение как гиперссылка на перечень сокращений
+\newcommand{\abbr}[1]{\hyperref[tab:abbr]{#1}}

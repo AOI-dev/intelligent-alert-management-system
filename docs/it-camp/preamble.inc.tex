@@ -1,0 +1,135 @@
+\sloppy
+\PassOptionsToPackage{table}{xcolor}
+
+% ============================================================
+%  preamble.inc.tex — Пакеты и настройки стиля ГОСТ 7-32
+%  Настраиваемые параметры вынесены в config.inc.tex
+% ============================================================
+
+% --- Гиперссылки в PDF ---
+\usepackage{float}
+\usepackage[
+  bookmarks=true, colorlinks=true, unicode=true,
+  urlcolor=black, linkcolor=black, anchorcolor=black,
+  citecolor=black, menucolor=black, filecolor=black,
+]{hyperref}
+\AfterHyperrefFix
+
+% --- Подписи к рисункам / таблицам ---
+\usepackage{ragged2e}
+\usepackage{caption}
+\captionsetup{%
+   justification=raggedright,
+   labelfont=bf,
+   singlelinecheck=off,
+   font=small,
+   labelsep=endash
+}
+\captionsetup[figure]{font=small}
+\captionsetup[table]{
+   justification=raggedleft,
+   labelfont=bf,
+   singlelinecheck=off,
+   font=small
+}
+
+% --- Типографика ---
+\usepackage{microtype}
+\ifInvisibleDashes
+  \MakeDashesBold
+\fi
+
+% --- Графика ---
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows, positioning, shadows}
+\usetikzlibrary{automata, arrows.meta, positioning, fit}
+
+% --- Геометрия (значения по умолчанию, перезаписываются в config.inc.tex) ---
+\geometry{ignorefoot}
+
+% --- Списки и таблицы ---
+\usepackage{enumerate}
+\usepackage{multirow}
+\usepackage{paralist,array}
+\usepackage{longtable}
+\usepackage{pdflscape}
+
+% --- Рамка вокруг всех иллюстраций ---
+% Каждое изображение обводится тонкой рамкой и вписывается в ширину строки
+% с учётом самой рамки, поэтому width=\textwidth не вылезает на поля.
+\usepackage{adjustbox}
+\let\origincludegraphics\includegraphics
+\renewcommand{\includegraphics}[2][]{%
+    \adjustbox{cfbox=black!45 0.4pt 3pt, max width=\linewidth}{\origincludegraphics[#1]{#2}}%
+}
+% Уменьшенный шрифт во всех таблицах (документ набран 14pt).
+\usepackage{etoolbox}
+\AtBeginEnvironment{tabular}{\small}
+\AtBeginEnvironment{longtable}{\footnotesize}
+\usepackage{booktabs}
+
+% --- Цветовое кодирование состояния в таблицах ---
+\usepackage{xcolor}
+\definecolor{cdone}{RGB}{223,240,216}   % реализовано
+\definecolor{cpart}{RGB}{252,243,207}   % частично
+\definecolor{cplan}{RGB}{219,233,248}   % целевое / не реализовано
+\definecolor{cna}{RGB}{238,238,238}     % неприменимо
+\definecolor{crisk}{RGB}{250,222,222}   % первоочередной риск
+\newcommand{\sdone}{\cellcolor{cdone}}
+\newcommand{\spart}{\cellcolor{cpart}}
+\newcommand{\splan}{\cellcolor{cplan}}
+\newcommand{\sna}{\cellcolor{cna}}
+\newcommand{\srisk}{\cellcolor{crisk}}
+
+% --- Разное ---
+\usepackage{blindtext}
+% \usepackage{syntax}  % КОНФЛИКТ с minted: syntax переопределяет \let в \makeatletter, ломая .pygstyle
+\usepackage{verbatim}
+\usepackage{pdfpages}
+\usepackage{setspace}
+\usepackage{multicol}
+\usepackage{calc}
+\usepackage{ifthen}
+\usepackage{algorithm2e}
+\usepackage{amsmath}
+\usepackage{fontspec}
+\usepackage[normalem]{ulem}
+\useunder{\uline}{\ul}{}
+
+% --- Таблицы из CSV ---
+\usepackage{pgfplotstable}
+\usepackage{csvsimple-l3}
+
+% --- Листинги (minted) ---
+\usepackage[newfloat]{minted}
+
+\DeclareFloatingEnvironment[
+  placement={!ht},
+  name=Equation
+]{eqndescNoIndent}
+\edef\fixEqndesc{%
+  \noexpand\setlength{\noexpand\parindent}{\the\parindent}%
+  \noexpand\setlength{\noexpand\parskip}{\the\parskip}%
+}
+\newenvironment{eqndesc}[1][!ht]{%
+    \begin{eqndescNoIndent}[#1]\fixEqndesc%
+}{\end{eqndescNoIndent}}
+
+\newenvironment{code}{\captionsetup{type=listing}}{}
+\DeclareCaptionLabelFormat{myformat}{#1 #2}
+\captionsetup[listing]{labelformat=myformat}
+\renewcommand{\thelisting}{\textsc{\lowercase{\arabic{listing}}}}
+
+\renewcommand\ListingInChapter{%
+    \counterwithin{listing}{chapter}
+    \renewcommand{\thelisting}{\textsc{\lowercase{\thechapter}}\arabic{listing}}
+}
+
+% --- Ширина бокса под номер главы в оглавлении ---
+% В G2-105.sty задано 1em, чего хватает только на однозначные номера: при
+% двузначном номере цифры наезжают на название главы. 1.6em согласуется с
+% настройкой \l@part в том же файле и безопасно вмещает любые 2-значные номера.
+\makeatletter
+\renewcommand{\l@chapter}{\@dottedtocline{1}{0mm}{1.6em}}
+\makeatother

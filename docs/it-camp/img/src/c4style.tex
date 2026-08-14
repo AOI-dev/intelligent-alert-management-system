@@ -1,0 +1,25 @@
+% Общий стиль C4-диаграмм: гротеск, белый текст с тонкой обводкой,
+% палитра C4-model. Подключается каждым fig-*.tex через \input.
+\usepackage{fontspec}
+\setmainfont{Roboto}
+\usepackage{contour}
+\contourlength{0.5pt}
+\usepackage{tikz}
+\usetikzlibrary{arrows, positioning, shadows, automata, arrows.meta, fit, calc}
+
+% Палитра C4-model, затемнённая до уровня, на котором белый текст читается
+\definecolor{c4person}{HTML}{08427B}
+\definecolor{c4system}{HTML}{1168BD}
+\definecolor{c4container}{HTML}{2E74B5}
+\definecolor{c4component}{HTML}{4A90D9}
+\definecolor{c4store}{HTML}{2A6187}
+\definecolor{c4ext}{HTML}{7A7A7A}
+
+% Заголовок узла: белый полужирный с тёмной обводкой
+\newcommand{\ttl}[1]{\contour{black!80}{\textbf{#1}}}
+% Тип узла в квадратных скобках
+\newcommand{\typ}[1]{{\small [#1]}}
+
+% Слой для рамок-контейнеров (виртуальных машин), чтобы заливка не перекрывала узлы
+\pgfdeclarelayer{background}
+\pgfsetlayers{background,main}

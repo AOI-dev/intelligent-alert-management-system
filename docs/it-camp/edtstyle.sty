@@ -1,0 +1,217 @@
+% ============================================================
+%  edtstyle.sty — оформление «Единого документа требований» (ЕДТ)
+%  Воспроизводит вёрстку example.pdf (Word-шаблон ЕДТ):
+%    * колонтитулы: курсивная строка сверху, «стр. N из M» снизу;
+%    * титульная страница с синим баннером и таблицами реквизитов;
+%    * страница «История изменений»;
+%    * заголовки: «1. Раздел» чёрным, «1.1 Подраздел» синим;
+%    * шапки таблиц — синяя заливка, белый жирный текст;
+%    * подписи таблиц и рисунков вида «Таблица 1. Название».
+%
+%  Подключать ПОСЛЕ preamble.inc и config.inc.
+%  Значения реквизитов задаются в config.inc.tex.
+% ============================================================
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{edtstyle}[2026/08/13 v1.0 EDT corporate look]
+
+\RequirePackage{fancyhdr}
+\RequirePackage{colortbl}
+\RequirePackage{tabularx}
+\RequirePackage{lastpage}
+
+% ------------------------------------------------------------
+%  Цвета (сняты пипеткой с example.pdf)
+% ------------------------------------------------------------
+\definecolor{edtblue}{RGB}{0,112,192}   % баннер титула, таблицы реквизитов
+\definecolor{edtdark}{RGB}{31,78,121}   % шапки таблиц, заголовки подразделов
+\definecolor{edtrule}{RGB}{80,80,80}    % линии таблиц
+
+% ------------------------------------------------------------
+%  Шрифты: основной — Times New Roman (задан в config.inc.tex),
+%  служебный (заголовки, колонтитулы, подписи) — Arial
+% ------------------------------------------------------------
+\newfontfamily\edtsans{Arial}
+
+% ------------------------------------------------------------
+%  Реквизиты документа (переопределяются в config.inc.tex)
+% ------------------------------------------------------------
+\newcommand{\edtProjectName}{Наименование проекта}
+\newcommand{\edtBannerTitle}{Единый документ требований}
+\newcommand{\edtDocTitle}{Единый документ требований к ИТ-решению}
+\newcommand{\edtDocVersion}{1.0}
+\newcommand{\edtDocDate}{\today}
+\newcommand{\edtDocPurpose}{Назначение документа}
+% Строка верхнего колонтитула
+\newcommand{\edtRunningHead}{\edtProjectName{} - ЕДТ - версия \edtDocVersion}
+
+% ------------------------------------------------------------
+%  Колонтитулы
+% ------------------------------------------------------------
+\fancypagestyle{edt}{%
+  \fancyhf{}%
+  \renewcommand{\headrulewidth}{0pt}%
+  \renewcommand{\footrulewidth}{0pt}%
+  \fancyhead[C]{\edtsans\itshape\fontsize{9}{11}\selectfont\edtRunningHead}%
+  \fancyfoot[R]{\edtsans\fontsize{9}{11}\selectfont стр.~\thepage{} из \pageref{LastPage}}%
+}
+% Титульная страница: колонтитул сверху есть, номера страницы нет (как в оригинале).
+\fancypagestyle{edttitle}{%
+  \fancyhf{}%
+  \renewcommand{\headrulewidth}{0pt}%
+  \renewcommand{\footrulewidth}{0pt}%
+  \fancyhead[C]{\edtsans\itshape\fontsize{9}{11}\selectfont\edtRunningHead}%
+}
+\pagestyle{edt}
+% Класс G7-32 ставит \thispagestyle{plain} на каждой странице с \chapter,
+% поэтому plain делаем тождественным edt — иначе колонтитулы пропадают.
+\makeatletter
+\let\ps@plain\ps@edt
+\makeatother
+
+% ------------------------------------------------------------
+%  Абзац и межстрочный интервал (как в Word-оригинале:
+%  без красной строки, с отбивкой между абзацами)
+% ------------------------------------------------------------
+\linespread{1.0}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{8pt plus 2pt minus 2pt}
+
+% ------------------------------------------------------------
+%  Заголовки
+% ------------------------------------------------------------
+\makeatletter
+% Нумерация без хвостовой точки у подразделов: 3.1, 3.1.1
+% (\thechapter в классе уже содержит точку: «3.»)
+\renewcommand\thesection{\thechapter\@arabic\c@section}
+\renewcommand\thesubsection{\thesection.\@arabic\c@subsection}
+\renewcommand\thesubsubsection{\thesubsection.\@arabic\c@subsubsection}
+
+% Разделы («1. Термины и определения») — Arial, полужирный, чёрный,
+% с небольшим отступом от левого поля.
+\newcommand\edtChapterStyle{%
+  \hyphenpenalty=10000
+  \edtsans\bfseries\fontsize{12}{15}\selectfont\color{black}%
+  \raggedright
+}
+\renewcommand\Gost@MainChapterStyle{\edtChapterStyle}
+\renewcommand\Gost@StructChapterStyle{\edtChapterStyle}
+\renewcommand\Gost@ChapterStyle{\edtChapterStyle}
+\setlength\Gost@ChapterIndent{6mm}
+\setlength\GostAfterTitleSkip{1.6ex}
+\setlength\GostBeforTitleSkip{3.0ex}
+
+% Ненумерованные разделы (Содержание, Введение, Заключение, приложения)
+% — тем же стилем, по левому краю.
+\def\@makeschapterhead#1{%
+  {\parindent\z@ \raggedright
+   \hspace{\Gost@ChapterIndent}\edtChapterStyle #1%
+   \par\nobreak
+   \vspace{\GostAfterTitleSkip}}}
+
+% Подразделы («3.1 Текущий процесс») — Arial, без насыщения, синий.
+\newcommand\edtSectionStyle{%
+  \hyphenpenalty=10000
+  \edtsans\normalfont\color{edtdark}%
+  \raggedright
+}
+\renewcommand\GostTitleStyle{\edtSectionStyle}
+\setlength\GostTitleIndent{0mm}
+\makeatother
+
+% Разделы верхнего уровня: «1. Название» по левому краю с отступом 6 мм.
+\titleformat{\chapter}[block]
+  {\edtChapterStyle}{\thechapter}{0.5em}{}
+\titlespacing*{\chapter}{6mm}{0pt}{14pt}
+
+\titleformat{\section}[block]
+  {\edtSectionStyle\fontsize{12}{15}\selectfont}{\thesection}{0.5em}{}
+\titlespacing*{\section}{0mm}{14pt}{6pt}
+\titleformat{\subsection}[block]
+  {\edtSectionStyle\fontsize{11}{14}\selectfont}{\thesubsection}{0.5em}{}
+\titlespacing*{\subsection}{0mm}{12pt}{4pt}
+\titleformat{\subsubsection}[block]
+  {\edtSectionStyle\fontsize{11}{14}\selectfont}{\thesubsubsection}{0.5em}{}
+\titlespacing*{\subsubsection}{0mm}{10pt}{4pt}
+
+% ------------------------------------------------------------
+%  Подписи: «Таблица 1. Название» над таблицей, «Рисунок 1. Название»
+%  под рисунком; Arial, кегль меньше основного.
+% ------------------------------------------------------------
+\captionsetup{labelsep=period, justification=raggedright,
+  singlelinecheck=false, font={small}, labelfont={}, textfont={}}
+\captionsetup[table]{position=above, labelsep=period,
+  justification=raggedright, singlelinecheck=false,
+  font={small}, labelfont={}, textfont={}}
+\captionsetup[figure]{position=below, labelsep=period,
+  justification=raggedright, singlelinecheck=false,
+  font={small}, labelfont={}, textfont={}}
+\captionsetup[listing]{position=above, labelsep=period,
+  justification=raggedright, singlelinecheck=false, font={small}}
+
+% ------------------------------------------------------------
+%  Таблицы
+% ------------------------------------------------------------
+\renewcommand{\arraystretch}{1.25}
+\arrayrulecolor{edtrule}
+
+% Ячейка шапки таблицы: белый полужирный текст на синей заливке.
+% Строка шапки начинается с \rowcolor{edtdark}.
+\newcommand{\hcell}[1]{{\edtsans\bfseries\color{white}#1}}
+% Готовая заливка строки-шапки — для новых таблиц: \edtheadrow \hcell{..} & ...
+\newcommand{\edtheadrow}{\rowcolor{edtdark}}
+
+% ------------------------------------------------------------
+%  Титульная страница ЕДТ
+% ------------------------------------------------------------
+\newcommand{\EDTTitlePage}{%
+  \thispagestyle{edttitle}%
+  \begingroup
+  \edtsans
+  \setlength{\parindent}{0pt}%
+  \setlength{\parskip}{0pt}%
+  \renewcommand{\arraystretch}{1.3}%
+  \vspace*{4mm}%
+  \noindent\colorbox{edtblue}{%
+    \begin{minipage}[c][16mm][c]{\dimexpr\textwidth-2\fboxsep\relax}
+      \centering\color{white}\bfseries\fontsize{20}{24}\selectfont \edtBannerTitle
+    \end{minipage}}\par
+  \vspace{8mm}%
+  \noindent\begin{tabularx}{\textwidth}{|X|}
+    \hline
+    \rowcolor{edtblue}\hcell{Наименование проекта} \\ \hline
+    \normalfont\edtProjectName \\ \hline
+  \end{tabularx}\par
+  \vspace{6mm}%
+  \noindent\begin{tabularx}{\textwidth}{%
+      |>{\columncolor{edtblue}\color{white}\bfseries\raggedright\arraybackslash}p{50mm}%
+      |>{\raggedright\arraybackslash\normalfont}X|}
+    \hline
+    Название документа  & \edtDocTitle   \\ \hline
+    Версия документа    & \edtDocVersion \\ \hline
+    Дата документа      & \edtDocDate    \\ \hline
+    Назначение документа & \edtDocPurpose \\ \hline
+  \end{tabularx}\par
+  \endgroup
+  \clearpage
+}
+
+% ------------------------------------------------------------
+%  Страница «История изменений»
+%  Аргумент — строки таблицы: Версия & Дата & Комментарий & Автор \\ \hline
+% ------------------------------------------------------------
+\newcommand{\EDTChangeLog}[1]{%
+  \thispagestyle{edt}%
+  \begingroup
+  \setlength{\parindent}{0pt}%
+  {\edtsans\bfseries\fontsize{12}{15}\selectfont История изменений\par}
+  \vspace{4mm}%
+  \noindent\begin{tabularx}{\textwidth}{|c|c|X|p{35mm}|}
+    \hline
+    \rowcolor{edtdark}\hcell{Версия} & \hcell{Дата} & \hcell{Комментарий} & \hcell{Автор} \\ \hline
+    #1
+  \end{tabularx}\par
+  \endgroup
+  \clearpage
+}
+
+\endinput

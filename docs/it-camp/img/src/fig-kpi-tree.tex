@@ -1,0 +1,104 @@
+\documentclass[border=6pt]{standalone}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{tikz}
+\usetikzlibrary{arrows, positioning, shadows, automata, arrows.meta, fit}
+\begin{document}
+\begin{tikzpicture}[
+    hdr/.style={font=\footnotesize\bfseries, anchor=west, text=blue!55!black},
+    col/.style={rectangle, fill=black!6, minimum width=5.2cm, rounded corners=1pt},
+    item/.style={rectangle, fill=black!6, text width=3.9cm, align=left, font=\scriptsize, inner sep=4pt, minimum height=1.1cm, anchor=west},
+    metric/.style={rectangle, fill=black!6, text width=3.6cm, align=left, font=\scriptsize, inner sep=4pt, minimum height=0.9cm, anchor=west},
+    base/.style={rectangle, fill=black!30, text=white, font=\scriptsize, minimum width=0.85cm, minimum height=0.42cm, inner sep=1pt},
+    goal/.style={rectangle, fill=blue!55, text=white, font=\scriptsize, minimum width=0.85cm, minimum height=0.42cm, inner sep=1pt},
+    sums/.style={rectangle, fill=black!6, text width=3.6cm, align=left, font=\scriptsize, inner sep=5pt, minimum height=2.4cm, anchor=west},
+    inv/.style={rectangle, fill=blue!60!black, text=white, text width=3.6cm, align=left, font=\scriptsize, inner sep=5pt, minimum height=2.6cm, anchor=west},
+    arrow/.style={-{Stealth[length=2mm]}, thick, black!60},
+]
+
+% ---------- заголовки колонок ----------
+\def\ca{0}      % продуктовые метрики
+\def\cb{6.4}    % факторы влияния (уровень 4)
+\def\cc{13.0}   % физические параметры (уровень 3)
+\def\cd{19.6}   % операционные КПЭ (уровень 2)
+\def\ce{26.2}   % сумм. опер. КПЭ и инвестиционные КПЭ
+
+\node[hdr] at (\ca,1.1) {ПРОДУКТОВЫЕ МЕТРИКИ};
+\node[hdr] at (\cb,1.1) {ФАКТОРЫ ВЛИЯНИЯ (УРОВЕНЬ 4)};
+\node[hdr] at (\cc,1.1) {ФИЗИЧЕСКИЕ ПАРАМЕТРЫ (УРОВЕНЬ 3)};
+\node[hdr] at (\cd,1.1) {ОПЕРАЦИОННЫЕ КПЭ (УРОВЕНЬ 2)};
+\node[hdr] at (\ce,1.1) {СУММ. ОПЕР. КПЭ (УРОВЕНЬ 2)};
+
+\draw[blue!55!black, thick] (\ca,0.75) -- (\ca+4.4,0.75);
+\draw[blue!55!black, thick] (\cb,0.75) -- (\cb+5.9,0.75);
+\draw[blue!55!black, thick] (\cc,0.75) -- (\cc+5.9,0.75);
+\draw[blue!55!black, thick] (\cd,0.75) -- (\cd+5.9,0.75);
+\draw[blue!55!black, thick] (\ce,0.75) -- (\ce+3.9,0.75);
+
+% ---------- продуктовые метрики ----------
+\node[metric] (m1) at (\ca,0.0) {Уведомлений на инцидент, шт.};
+\node[metric] (m2) at (\ca,-1.1) {Уведомлений не тому адресату, шт.};
+\node[metric] (m3) at (\ca,-2.2) {Доля полезных уведомлений, \%};
+\node[metric] (m4) at (\ca,-3.3) {Полнота обнаружения инцидентов};
+\draw[dashed, black!50] (\ca-0.15,0.5) rectangle (\ca+3.9,-3.85);
+
+% ---------- уровень 4: факторы влияния ----------
+\node[item] (f1) at (\cb,0.0) {4.1. Снижение числа уведомлений на инцидент};
+\node[base] at (\cb+4.55,0.0) {132};
+\node[goal] at (\cb+5.55,0.0)  {5,5};
+
+\node[item] (f2) at (\cb,-1.6) {4.2. Снижение числа ошибочных адресаций};
+\node[base] at (\cb+4.55,-1.6) {329};
+\node[goal] at (\cb+5.55,-1.6)  {13};
+
+\node[item] (f3) at (\cb,-3.2) {4.3. Полнота обнаружения (контрольный фактор)};
+\node[base] at (\cb+4.55,-3.2) {8/8};
+\node[goal] at (\cb+5.55,-3.2)  {8/8};
+
+% ---------- уровень 3: физические параметры ----------
+\node[item] (p1) at (\cc,-0.5) {3.1. Трудозатраты на разбор оповещений, чел.-ч/год};
+\node[base] at (\cc+4.55,-0.5) {1752};
+\node[goal] at (\cc+5.55,-0.5)  {526};
+
+\node[item] (p2) at (\cc,-2.6) {3.2. Время простоя из-за задержки реакции, ч/год};
+\node[base] at (\cc+4.55,-2.6) {40,0};
+\node[goal] at (\cc+5.55,-2.6)  {38,5};
+
+% ---------- уровень 2: операционные КПЭ ----------
+\node[item] (o1) at (\cd,-0.5) {2.1. Сокращение трудозатрат, млн руб./год};
+\node[base] at (\cd+4.55,-0.5) {0};
+\node[goal] at (\cd+5.55,-0.5)  {2,45};
+
+\node[item] (o2) at (\cd,-2.6) {2.2. Снижение потерь от простоя, млн руб./год};
+\node[base] at (\cd+4.55,-2.6) {0};
+\node[goal] at (\cd+5.55,-2.6)  {9,38};
+
+% ---------- сумм. опер. КПЭ и инвестиционные КПЭ ----------
+\node[sums] (sum) at (\ce,-0.5) {2.3. Сокращение операционных затрат (в среднем), млн руб./год \\[4pt] \textbf{11,8}};
+\node[hdr, text width=3.8cm] at (\ce,-3.0) {ИНВЕСТИЦИОННЫЕ КПЭ (УРОВЕНЬ 1)};
+\node[inv] (inv) at (\ce,-4.6) {NPV: \textbf{13,9} млн руб. \\[3pt] PI/J: \textbf{3,1} \\[3pt] DPP: \textbf{0,8} года \\[3pt] Горизонт расчёта: 3 года};
+
+% ---------- связи ----------
+\draw[arrow] (m1.east) -- (f1.west);
+\draw[arrow] (m2.east) -- (f2.west);
+\draw[arrow] (m4.east) -- (f3.west);
+\draw[arrow] (f1.east) -- (p1.west);
+\draw[arrow] (f2.east) -- (p1.west);
+\draw[arrow] (f2.east) -- (p2.west);
+\draw[arrow] (f3.east) -- (p2.west);
+\draw[arrow] (p1.east) -- (o1.west);
+\draw[arrow] (p2.east) -- (o2.west);
+\draw[arrow] (o1.east) -- (sum.west);
+\draw[arrow] (o2.east) -- (sum.west);
+\draw[arrow] (sum.south) -- (inv.north);
+
+% ---------- легенда ----------
+\node[base] at (\ca+0.4,-5.4) {xx};
+\node[anchor=west, font=\scriptsize] at (\ca+0.9,-5.4) {Базовое значение};
+\node[goal] at (\ca+3.4,-5.4) {xx};
+\node[anchor=west, font=\scriptsize] at (\ca+3.9,-5.4) {Целевое значение (достигнутое на пилоте)};
+\node[draw=orange!80!black, thick, anchor=west, font=\scriptsize, text=orange!60!black, inner sep=4pt, text width=8.4cm, align=center]
+    at (\cc,-6.4) {ПАРАМЕТРЫ 2, 3, 4 УРОВНЕЙ~--- СРЕДНЕГОДОВЫЕ (С ВЫХОДА НА ЗАПЛАНИРОВАННЫЙ ОБЪЁМ И ФУНКЦИОНАЛ)};
+
+\end{tikzpicture}
+\end{document}

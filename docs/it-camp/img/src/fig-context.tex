@@ -1,0 +1,40 @@
+\documentclass[border=6pt]{standalone}
+\input{c4style}
+
+\begin{document}
+\begin{tikzpicture}[
+    font=\normalsize,
+    person/.style={rectangle, rounded corners=8pt, draw=black!45, thick, fill=c4person, text=white,
+                   text width=4.0cm, align=center, inner sep=7pt, minimum height=1.9cm},
+    system/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4system, text=white,
+                   text width=4.4cm, align=center, inner sep=7pt, minimum height=2.3cm},
+    ext/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4ext, text=white,
+                text width=4.0cm, align=center, inner sep=7pt, minimum height=1.9cm},
+    rel/.style={-{Stealth[length=3mm]}, thick, black!55, font=\small},
+]
+
+\node[person] (eng)   {\ttl{Дежурный инженер}\\[3pt] \typ{Person}\\[3pt] Обрабатывает аварии};
+\node[person, below=1.4cm of eng] (admin) {\ttl{Администратор}\\[3pt] \typ{Person}\\[3pt] Настраивает правила и роли};
+
+\node[system, right=3.6cm of eng, yshift=-1.7cm] (sys)
+    {\ttl{Платформа управления оповещениями}\\[3pt] \typ{Software System}\\[3pt] Приём, корреляция, маршрутизация, доставка};
+
+\node[ext, right=3.6cm of sys, yshift=2.6cm] (mon)
+    {\ttl{Системы мониторинга}\\[3pt] \typ{External}\\[3pt] Zabbix, Prometheus};
+\node[ext, right=3.6cm of sys] (tc)
+    {\ttl{TrueConf Server}\\[3pt] \typ{External}\\[3pt] Мессенджер и OAuth~2};
+\node[ext, right=3.6cm of sys, yshift=-2.6cm] (ad)
+    {\ttl{Active Directory}\\[3pt] \typ{External}\\[3pt] Справочник атрибутов};
+
+\draw[rel] (eng.east)   -- node[above, sloped] {дашборд} (sys.north west);
+\draw[rel] (admin.east) -- node[below, sloped] {настройка} (sys.south west);
+\draw[rel] (mon.west)   -- node[above, sloped] {события} (sys.north east);
+\draw[rel] (sys.east)   -- node[above] {уведомления, OAuth~2} (tc.west);
+\draw[rel] (ad.west)    -- node[below, sloped] {атрибуты} (sys.south east);
+\draw[rel] (tc.north)   to[out=90,in=0] node[above, sloped] {сообщение в чат} (eng.east);
+
+\node[anchor=north west, align=left, font=\small] at (-2.6,-6.6)
+    {\textbf{C4, уровень 1: System Context.} Тёмно-синий~--- пользователи, синий~--- проектируемая система, серый~--- внешние системы.};
+
+\end{tikzpicture}
+\end{document}

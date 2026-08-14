@@ -1,0 +1,63 @@
+% ============================================================
+%  config.inc.tex — Настраиваемые параметры шаблона ЕДТ
+%  Меняй значения здесь, не трогая preamble.inc.tex / edtstyle.sty
+% ============================================================
+
+% --- Нумерация (раскомментировать = нумерация внутри раздела) ---
+% \EqInChapter        % формулы:  1.1, 1.2, 2.1 ...
+% \TableInChapter     % таблицы:  1.1, 1.2, 2.1 ...
+% \PicInChapter       % рисунки:  1.1, 1.2, 2.1 ...
+\ListingInChapter     % листинги: 1.1, 1.2, 2.1 ...
+
+% --- Поля страницы (как в Word-оригинале ЕДТ: 25 мм) ---
+\geometry{left=25mm}
+\geometry{right=25mm}
+\geometry{top=25mm}
+\geometry{bottom=20mm}
+\geometry{headheight=14pt}
+\geometry{headsep=8mm}
+\geometry{footskip=12mm}
+
+% --- Шрифты ---
+\setmainfont{Times New Roman}   % основной текст
+\setsansfont{Arial}             % заголовки, колонтитулы, подписи
+
+% --- Кегль основного текста задаётся опцией класса в rpz.tex (12pt) ---
+
+% ============================================================
+%  Реквизиты документа (титул + колонтитул)
+% ============================================================
+\renewcommand{\edtProjectName}{Интеллектуальная система управления оповещениями}
+\renewcommand{\edtBannerTitle}{Единый документ требований}
+\renewcommand{\edtDocTitle}{Единый документ требований к ИТ-решению}
+\renewcommand{\edtDocVersion}{1.1}
+\renewcommand{\edtDocDate}{08.08.2026}
+\renewcommand{\edtDocPurpose}{Определяет контекст для разработки требований и
+описывает требования различных уровней, обеспечивая их согласованность и
+прослеживаемость для успешной реализации проекта ИТ и ЦТ}
+% Строка верхнего колонтитула (по умолчанию — «проект - ЕДТ - версия X»)
+\renewcommand{\edtRunningHead}{\edtProjectName{} - ЕДТ - версия \edtDocVersion}
+
+% ============================================================
+%  Текстовые константы (названия разделов, подписи)
+% ============================================================
+
+% --- Оглавление ---
+\addto\captionsrussian{\renewcommand\contentsname{Содержание}}
+
+% --- Введение ---
+\renewcommand\Introduction{\chapter*{Введение}\addcontentsline{toc}{chapter}{Введение}}
+
+% --- Заключение ---
+\renewcommand\Conclusion{\chapter*{Заключение}\addcontentsline{toc}{chapter}{Заключение}}
+
+% --- Список источников ---
+\addto\captionsrussian{\renewcommand\bibname{Список использованных источников}}
+
+% --- Приложение ---
+\addto\captionsrussian{\renewcommand\appendixname{Приложение}}
+
+% --- Подписи к плавающим объектам ---
+\addto\captionsrussian{\renewcommand\tablename{Таблица}}
+\addto\captionsrussian{\renewcommand\figurename{Рисунок}}
+\SetupFloatingEnvironment{listing}{name=Листинг}

@@ -1,0 +1,23 @@
+\documentclass[border=6pt]{standalone}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{tikz}
+\usetikzlibrary{arrows, positioning, shadows, automata, arrows.meta, fit}
+\begin{document}
+\begin{tikzpicture}[
+            src/.style={rectangle, draw, fill=gray!12, text width=2.2cm, text centered, minimum height=0.9cm, rounded corners, font=\footnotesize},
+            conn/.style={rectangle, draw, dashed, fill=green!12, text width=2.2cm, text centered, minimum height=0.9cm, rounded corners, font=\footnotesize},
+            inner/.style={rectangle, draw, fill=blue!10, text width=2.2cm, text centered, minimum height=0.9cm, rounded corners, font=\footnotesize},
+            arrow/.style={-{Stealth[length=2mm]}, thick, font=\scriptsize}
+        ]
+            \node[src] (z) {Zabbix};
+            \node[src, below=1.0cm of z] (p) {Prometheus};
+            \node[conn, right=1.0cm of z] (c1) {Коннектор узла};
+            \node[conn, right=1.0cm of p] (c2) {Коннектор узла};
+            \node[inner, right=1.2cm of c1, yshift=-1.0cm, minimum height=1.6cm] (core) {Платформа: ядро};
+            \draw[arrow] (z) -- (c1);
+            \draw[arrow] (p) -- (c2);
+            \draw[arrow, dashed] (c1) -- (core);
+            \draw[arrow, dashed] (c2) -- (core);
+        \end{tikzpicture}
+\end{document}

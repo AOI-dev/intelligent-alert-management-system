@@ -1,0 +1,28 @@
+\documentclass[border=6pt]{standalone}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{tikz}
+\usetikzlibrary{arrows, positioning, shadows, automata, arrows.meta, fit}
+\begin{document}
+\begin{tikzpicture}[
+        zone/.style={rectangle, draw, dashed, thick, inner sep=0.4cm, rounded corners},
+        box/.style={rectangle, draw, fill=blue!10, text width=2.7cm, text centered, minimum height=1.1cm, rounded corners, font=\small},
+        closed/.style={rectangle, draw, fill=red!10, text width=2.7cm, text centered, minimum height=1.1cm, rounded corners, font=\small},
+        arrow/.style={-{Stealth[length=3mm]}, thick, font=\footnotesize}
+    ]
+        \node[box, dashed, fill=white] (gw) {WAF и API gateway};
+        \node[box, below=0.8cm of gw] (waf) {TLS-фронт, ограничение частоты};
+        \draw[arrow, dashed] (gw) -- (waf);
+        \node[box, right=2.6cm of waf] (plat) {Платформа и веб-интерфейс};
+        \node[closed, right=2.6cm of plat] (db) {TimescaleDB, Kafka};
+        \node[closed, below=1.1cm of db] (ai) {Инференс модели};
+
+        \node[above=0.15cm of gw, font=\footnotesize] {публикуется наружу};
+        \node[above=0.15cm of plat, font=\footnotesize] {ограниченная публикация};
+        \node[above=0.15cm of db, font=\footnotesize] {только внутренняя сеть};
+
+        \draw[arrow] (waf) -- node[above] {HTTPS} (plat);
+        \draw[arrow] (plat) -- node[above] {сеть стека} (db);
+        \draw[arrow] (plat) -- node[below, sloped] {внутренний вызов} (ai);
+    \end{tikzpicture}
+\end{document}

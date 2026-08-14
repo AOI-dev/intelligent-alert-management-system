@@ -1,0 +1,32 @@
+# Артефакты компиляции LaTeX
+out/
+_minted-rpz/
+*.aux
+*.log
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bcf
+*.run.xml
+*.xdv
+*.nlo
+*.nls
+*.ilg
+*.ind
+*.idx
+
+# Zone.Identifier — метаданные Windows при копировании из другого ФС
+*:Zone.Identifier
+
+# IDE
+.idea/
+
+# Промежуточные файлы сборки картинок: PDF в img/src/ — вывод xelatex,
+# пересобирается из .tex; итоговые img/fig-*.pdf (используются в rpz.tex)
+# и img/src/*.svg (редактируемые мастера) остаются под версионным контролем.
+img/src/*.aux
+img/src/*.log
+img/src/*.pdf

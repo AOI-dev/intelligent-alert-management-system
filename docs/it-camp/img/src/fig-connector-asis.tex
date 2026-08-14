@@ -1,0 +1,21 @@
+\documentclass[border=6pt]{standalone}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{tikz}
+\usetikzlibrary{arrows, positioning, shadows, automata, arrows.meta, fit}
+\begin{document}
+\begin{tikzpicture}[
+            src/.style={rectangle, draw, fill=gray!12, text width=2.2cm, text centered, minimum height=0.9cm, rounded corners, font=\footnotesize},
+            inner/.style={rectangle, draw, fill=blue!10, text width=2.2cm, text centered, minimum height=0.9cm, rounded corners, font=\footnotesize},
+            host/.style={rectangle, draw, thick, inner sep=0.25cm, rounded corners},
+            arrow/.style={-{Stealth[length=2mm]}, thick, font=\scriptsize}
+        ]
+            \node[src] (z) {Zabbix};
+            \node[src, below=0.4cm of z] (p) {Prometheus};
+            \node[inner, right=1.5cm of z] (ad) {Адаптеры};
+            \node[inner, below=0.4cm of ad] (core) {Ядро};
+            \node[host, fit=(ad)(core), label={[font=\scriptsize]above:Платформа}] {};
+            \draw[arrow] (z) -- (ad);
+            \draw[arrow] (p) -- (ad);
+        \end{tikzpicture}
+\end{document}

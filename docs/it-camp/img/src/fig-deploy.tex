@@ -1,0 +1,75 @@
+\documentclass[border=8pt]{standalone}
+\input{c4style}
+
+\begin{document}
+\begin{tikzpicture}[
+    font=\normalsize,
+    vm/.style={rectangle, rounded corners=6pt, draw=black!55, very thick, dashed,
+               inner sep=0.45cm, fill=black!4},
+    vmlbl/.style={font=\bfseries, anchor=north west, align=left},
+    cont/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4container, text=white,
+                 text width=3.5cm, align=center, inner sep=5pt, minimum height=1.0cm},
+    store/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4store, text=white,
+                  text width=3.5cm, align=center, inner sep=5pt, minimum height=1.0cm},
+    gpu/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4person, text=white,
+                text width=3.5cm, align=center, inner sep=5pt, minimum height=1.0cm},
+    ext/.style={rectangle, rounded corners=4pt, draw=black!45, thick, fill=c4ext, text=white,
+                text width=3.3cm, align=center, inner sep=5pt, minimum height=0.95cm},
+    rel/.style={-{Stealth[length=3mm]}, very thick, black!55, font=\small, align=center},
+    note/.style={font=\small, align=center, text=black!70},
+]
+
+% ---------------- контур заказчика ----------------
+\node[ext] (zbx)  at (0,2.4)  {\ttl{Zabbix}};
+\node[ext] (prom) at (0,1.1)  {\ttl{Prometheus}};
+\node[ext] (tc)   at (0,-0.2) {\ttl{TrueConf Server}};
+\node[ext] (ad)   at (0,-1.5) {\ttl{Active Directory}};
+\begin{pgfonlayer}{background}
+\node[vm, fit=(zbx)(ad), draw=black!45] (custvm) {};
+\end{pgfonlayer}
+\node[vmlbl, text=black!65] at ([shift={(-0.1,0.55)}]custvm.north west) {Контур заказчика};
+
+% ---------------- ВМ 1: приложения ----------------
+\node[cont] (plat) at (6.6,2.4)  {\ttl{Платформа}};
+\node[cont] (web)  at (6.6,1.1)  {\ttl{Веб-интерфейс}};
+\node[cont] (disp) at (6.6,-0.2) {\ttl{Диспетчер}};
+\node[cont] (bot)  at (6.6,-1.5) {\ttl{Бот TrueConf}};
+\begin{pgfonlayer}{background}
+\node[vm, fit=(plat)(bot)] (vm1) {};
+\end{pgfonlayer}
+\node[vmlbl] at ([shift={(-0.1,1.05)}]vm1.north west) {ВМ~1: приложения\\[2pt] {\small 4 vCPU, 8 ГБ, 50 ГБ}};
+% индикатор горизонтального масштабирования
+\draw[black!45, very thick, dashed, rounded corners=6pt]
+    ([shift={(0.25,0.25)}]vm1.south west) rectangle ([shift={(0.55,0.55)}]vm1.north east);
+\node[note] at ([shift={(0,-0.75)}]vm1.south) {масштабируется горизонтально:\\ $+N$ экземпляров в одной группе};
+
+% ---------------- ВМ 2: данные и шина ----------------
+\node[cont]  (kafka) at (13.0,1.7)  {\ttl{Kafka}};
+\node[store] (db)    at (13.0,0.2)  {\ttl{TimescaleDB}};
+\begin{pgfonlayer}{background}
+\node[vm, fit=(kafka)(db)] (vm2) {};
+\end{pgfonlayer}
+\node[vmlbl] at ([shift={(-0.1,1.05)}]vm2.north west) {ВМ~2: данные и шина\\[2pt] {\small 8 vCPU, 16 ГБ, 200 ГБ SSD}};
+\node[note] at ([shift={(0,-0.75)}]vm2.south) {масштабируется вертикально:\\ упирается в CPU и диск};
+
+% ---------------- ВМ 3: ИИ ----------------
+\node[gpu] (vllm) at (19.0,1.0) {\ttl{vLLM + Qwen}};
+\begin{pgfonlayer}{background}
+\node[vm, fit=(vllm)] (vm3) {};
+\end{pgfonlayer}
+\node[vmlbl] at ([shift={(-0.1,1.05)}]vm3.north west) {ВМ~3: ИИ\\[2pt] {\small 8 vCPU, 32 ГБ, GPU 16 ГБ}};
+\node[note] at ([shift={(0,-0.75)}]vm3.south) {масштабируется по видеопамяти:\\ $+$ GPU-узлы};
+
+% ---------------- связи ----------------
+\draw[rel] (custvm.east |- plat) -- node[above] {события} (vm1.west |- plat);
+\draw[rel] (vm1.west |- bot) -- node[below] {уведомления} (custvm.east |- bot);
+\draw[rel] (vm1.east |- web) -- node[above] {топики, история} (vm2.west |- web);
+\draw[rel] (vm2.east |- db) -- node[above, pos=0.35] {запросы\\ к модели} (vm3.west |- vllm);
+
+% ---------------- легенда ----------------
+\node[anchor=north west, align=left, font=\small] at ([shift={(0,-1.9)}]custvm.south west)
+    {\textbf{Обозначения:} штриховая рамка~--- виртуальная машина; скруглённый прямоугольник~--- контейнер Docker;\\
+     двойная рамка~--- узел, тиражируемый по горизонтали. Каждый стек разворачивается независимо (Docker Compose).};
+
+\end{tikzpicture}
+\end{document}
